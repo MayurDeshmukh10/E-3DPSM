@@ -66,6 +66,8 @@ class RealEventStream(Dataset):
         
         with h5py_File(self.stream_path, 'r') as f:
             return f['event'].shape[0] // self.batch_size
+            # return f['event'].shape[0]
+
         
     def get_event_batch(self, idx, num_events):
         if self.is_train:
@@ -78,6 +80,8 @@ class RealEventStream(Dataset):
         while frame_time < max_frame_time:
             data_batch = self.fin[idx: idx + num_events] 
             ts = data_batch[:, 2] 
+
+            # print("ts", ts)
             
             if not len(ts): 
                 break
@@ -89,10 +93,13 @@ class RealEventStream(Dataset):
             frame_time += ts
             idx += num_events
 
+        # data_batches = self.fin
+        
         if len(data_batches) == 0:
             raise StopIteration
         
         data_batches_np = np.concatenate(data_batches, axis=0)
+        # data_batches_np = np.array(data_batches)
         del data_batches
 
         return data_batches_np

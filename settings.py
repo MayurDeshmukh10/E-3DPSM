@@ -25,7 +25,7 @@ config.PRINT_FREQ = 50
 config.TEST_ITERATIONS_PER_EPOCH = 2000
 
 config.MODEL = edict()
-config.MODEL.INPUT_CHANNEL = 2
+config.MODEL.INPUT_CHANNEL = 18
 config.MODEL.IMAGE_SIZE = [256, 192] 
 config.MODEL.HEAT_MAP_SCALE = 4
 config.MODEL.HEATMAP_SIZE = [config.MODEL.IMAGE_SIZE[0] // config.MODEL.HEAT_MAP_SCALE, config.MODEL.IMAGE_SIZE[1] // config.MODEL.HEAT_MAP_SCALE]  # width * height, ex: 24 * 32
@@ -41,26 +41,26 @@ config.MODEL.CHECKPOINT_PATH = os.getenv('CHECKPOINT_PATH', '')
 # DATASET related params
 config.DATASET = edict()
 
-config.DATASET.TEMPORAL_STEPS = 20 
-config.TRAIN_ITERATIONS_PER_EPOCH = 10000 
+config.DATASET.TEMPORAL_STEPS = 1
+config.TRAIN_ITERATIONS_PER_EPOCH = 10000
 
 config.DATASET.TYPE = 'Synthetic'
-config.DATASET.BG_AUG = True
+config.DATASET.BG_AUG = False
 
 # config.DATASET.TYPE = 'Real'
 # config.DATASET.BG_AUG = False
 
-config.DATASET.REAL_ROOT = 'Specifiy the path to the real dataset (EE3D-R FOLDER) in Line 53 of settings.py'
-config.DATASET.SYN_ROOT = 'Specifiy the path to the synthetic dataset(EE3D-S FOLDER) in Line 54 of settings.py'
-config.DATASET.SYN_TEST_ROOT = 'Specifiy the path to the synthetic test dataset(EE3D-S-Test FOLDER) in Line 55 of settings.py'
-config.DATASET.BACKGROUND_DATASET_ROOT = 'Specifiy the path to the background dataset (Background_Dataset FOLDER) in Line 56 of settings.py'
+config.DATASET.REAL_ROOT = '/CT/datasets07/nobackup/EE3D-R/Real_Dataset'
+config.DATASET.SYN_ROOT = '/CT/datasets07/nobackup/EE3D-S'
+config.DATASET.SYN_TEST_ROOT = '/CT/datasets07/nobackup/EE3D-S-Test'
+config.DATASET.BACKGROUND_DATASET_ROOT = '/CT/datasets07/nobackup/EE3D-R/Background_Dataset'
 
 
 config.DATASET.REAL = edict()
 config.DATASET.SYNTHETIC = edict()
 
 config.DATASET.SCALE_FACTOR = 0.2
-config.DATASET.FLIP = True
+config.DATASET.FLIP = True  
 config.DATASET.ROT_FACTOR = 3
 
 
@@ -70,11 +70,15 @@ config.DATASET.ENSEMBLE_DATASETS = [
 ]
 
 
-config.DATASET.REPRESENTATION = 'LNES'
+# config.DATASET.REPRESENTATION = 'LNES'
+config.DATASET.REPRESENTATION = 'RawEvent'
 
-config.DATASET.EVENT_BATCH_SIZE = 8192 
+config.DATASET.EVENT_BATCH_SIZE = 8192
+# config.DATASET.EVENT_BATCH_SIZE = 4096
 config.DATASET.REAL.MAX_FRAME_TIME_IN_MS = 33
 config.DATASET.SYNTHETIC.MAX_FRAME_TIME_IN_MS = 20
+# config.DATASET.REAL.MAX_FRAME_TIME_IN_MS = 5
+# config.DATASET.SYNTHETIC.MAX_FRAME_TIME_IN_MS = 5
 config.DATASET.SYNTHETIC.RETURN_RGB = False
 
 config.DATASET.LNES = edict()
@@ -102,7 +106,7 @@ config.OUTPUT_DIR = './logs/output'
 config.LOG_DIR = './logs/tensorboard'
 config.DATA_DIR = ''
 config.GPUS = '0'
-config.WORKERS = 4
+config.WORKERS = 8
 
 # Cudnn related params
 config.CUDNN = edict()
@@ -126,7 +130,7 @@ config.TRAIN = edict()
 
 config.TRAIN.LR_FACTOR = 0.1
 config.TRAIN.LR_STEP = [90, 110]
-config.TRAIN.LR = 0.001
+config.TRAIN.LR = 0.0001 #0.001
 
 config.TRAIN.OPTIMIZER = 'adam'
 config.TRAIN.MOMENTUM = 0.9
@@ -136,7 +140,7 @@ config.TRAIN.GAMMA1 = 0.99
 config.TRAIN.GAMMA2 = 0.0
 
 config.TRAIN.BEGIN_EPOCH = 0
-config.TRAIN.END_EPOCH = 140
+config.TRAIN.END_EPOCH = 82
 
 config.TRAIN.RESUME = False
 config.TRAIN.CHECKPOINT = ''

@@ -31,7 +31,9 @@ class HeatMapJointsMSELoss(nn.Module):
                 loss_j= self.criterion(heatmap_pred, heatmap_gt)
 
             loss += loss_j
-            
+        
+        if loss == 0:
+            raise ValueError("No valid HeatMapJointsMSELoss")
         return loss.mean() / num_joints
 
 
@@ -60,6 +62,13 @@ class J3dMSELoss(nn.Module):
             else:
                 loss += self.criterion(j3d_pred, j3d_gt)
 
+        # import pdb; pdb.set_trace()
+        # try:
+        #     if loss == 0:
+        #         print("No valid J3dMSELoss")
+        # except:
+        #     import pdb; pdb.set_trace()
+        #     raise ValueError("No valid J3dMSELoss")
         return loss.mean() / num_joints
 
 
@@ -67,7 +76,8 @@ class SegmentationLoss(nn.Module):
     def __init__(self) -> None:
         super(SegmentationLoss, self).__init__()
 
-        self.loss = nn.BCELoss()
+        # self.loss = nn.BCELoss()
+        self.loss = nn.BCEWithLogitsLoss()
 
     def forward(self, output, target, weight=None):
         if weight is None:

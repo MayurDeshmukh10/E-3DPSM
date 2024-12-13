@@ -62,39 +62,40 @@ class Joints3DDataset(Dataset):
         j2d[:, 0] *= sx
         j2d[:, 1] *= sy
 
-        if "augment" in kwargs and kwargs['augment'] is True:                        
-            add_mask = (np.random.rand(target_height, target_width, 2) > 0.9995).astype(np.float32)
-            add_mask = cv2.dilate(add_mask, np.ones((2, 2)))
-            inp = inp + add_mask
+        # if "augment" in kwargs and kwargs['augment'] is True:                        
+        #     add_mask = (np.random.rand(target_height, target_width, 2) > 0.9995).astype(np.float32)
+        #     add_mask = cv2.dilate(add_mask, np.ones((2, 2)))
+        #     inp = inp + add_mask
             
-            if "A" in kwargs:
-                A = kwargs['A']            
-                inp = transforms.crop(inp, A, [target_width, target_height])
-                segmentation_mask = transforms.crop(segmentation_mask, A, [target_width, target_height])
-                j2d = transforms.affine_transform_pts(j2d, A)
+        #     if "A" in kwargs:
+        #         A = kwargs['A']            
+        #         inp = transforms.crop(inp, A, [target_width, target_height])
+        #         segmentation_mask = transforms.crop(segmentation_mask, A, [target_width, target_height])
+        #         j2d = transforms.affine_transform_pts(j2d, A)
         
-            if np.random.rand() > 0.5:
-                inp = transforms.random_dropout(inp, np.random.rand() * 0.1)
+        #     if np.random.rand() > 0.5:
+        #         inp = transforms.random_dropout(inp, np.random.rand() * 0.1)
             
-            if "flip_axis" in kwargs and kwargs['flip_axis'] is True:
-                inp = transforms.flip_axis(inp, -1)
+        #     if "flip_axis" in kwargs and kwargs['flip_axis'] is True:
+        #         inp = transforms.flip_axis(inp, -1)
             
-            if "flip_lr" in kwargs and kwargs['flip_lr'] is True:
-                inp = transforms.flip_lr(inp)
-                segmentation_mask = transforms.flip_lr(segmentation_mask)
-                j2d = transforms.flip_lr_joints(inp, j2d)
+        #     if "flip_lr" in kwargs and kwargs['flip_lr'] is True:
+        #         inp = transforms.flip_lr(inp)
+        #         segmentation_mask = transforms.flip_lr(segmentation_mask)
+        #         j2d = transforms.flip_lr_joints(inp, j2d)
                 
-        inp_tensor = torch.from_numpy(inp).permute(2, 0, 1).float()
+        # inp_tensor = torch.from_numpy(inp).permute(2, 0, 1).float()
         segmentation_mask = torch.from_numpy(segmentation_mask).float().unsqueeze(0)
 
-        inp_tensor = torch.clamp_(inp_tensor, 0, 1)
+        # inp_tensor = torch.clamp_(inp_tensor, 0, 1)
         segmentation_mask = torch.clamp_(segmentation_mask, 0, 1)
 
         
         inp_h, inp_w = inp.shape[:2]
 
-        invalid_j2d = (j2d[:, 0] < 0) + (j2d[:, 1] < 0) + (j2d[:, 0] >= inp_w) + (j2d[:, 1] >= inp_h)
-        valid_j2d = 1 - invalid_j2d[:, None]
+        # invalid_j2d = (j2d[:, 0] < 0) + (j2d[:, 1] < 0) + (j2d[:, 0] >= inp_w) + (j2d[:, 1] >= inp_h)
+        # valid_j2d = 1 - invalid_j2d[:, None]
+        valid_j2d = np.ones_like(j2d)
 
         # During validation, the network should learn a prior for the occluded joints.
         if self.is_train is False:
@@ -155,7 +156,7 @@ class Joints3DDataset(Dataset):
             'ego_to_global_space': ego_to_global_space,
         }
 
-        return {'x': inp_tensor, 'hms': target, 'weight': vis_j2d, 'j3d': j3d, 'j2d': j2d, 'segmentation_mask': segmentation_mask}, meta
+        return {'x': inp, 'hms': target, 'weight': vis_j2d, 'j3d': j3d, 'j2d': j2d, 'segmentation_mask': segmentation_mask}, meta
 
     def generate_target(self, joints, joints_vis):
         '''
@@ -237,9 +238,17 @@ class Joints3DDataset(Dataset):
             current_seq_indices = frame_indices >= start_index             
             current_seq_indices = np.logical_and(current_seq_indices, frame_indices < end_index)
             
-            gt_j3ds = all_gt_j3ds[current_seq_indices]
-            preds_j3d = all_preds_j3d[current_seq_indices]
-            vis_j3d = all_vis_j3d[current_seq_indices]
+            try:
+                gt_j3ds = all_gt_j3ds[current_seq_indices]
+                preds_j3d = all_preds_j3d[current_seq_indices]
+                vis_j3d = all_vis_j3d[current_seq_indices]
+            except:
+                print(f"Warning: Mismatch in array dimensions. frame_indices has {len(frame_indices)}, but all_preds_j3d has {len(all_preds_j3d)}.")
+                min_length = min(len(all_preds_j3d), len(frame_indices))
+                # frame_indices = frame_indices[:min_length]
+                preds_j3d = all_preds_j3d[:min_length]
+                gt_j3ds = all_gt_j3ds[:min_length]
+                vis_j3d = all_vis_j3d[:min_length]
             
             errors, errors_pa = compute_3d_errors_batch(gt_j3ds, preds_j3d, vis_j3d)
 
@@ -264,6 +273,10 @@ class Joints3DDataset(Dataset):
     
     @classmethod
     def evaluate_joints(cls, cfg, all_gt_j3ds, all_preds_j3d, all_vis_j3d):
+        min_length = min(len(all_preds_j3d), len(all_gt_j3ds), len(all_vis_j3d))
+        all_gt_j3ds = all_gt_j3ds[:min_length]
+        all_preds_j3d = all_preds_j3d[:min_length]
+        all_vis_j3d = all_vis_j3d[:min_length]
         errors, errors_pa = compute_3d_errors_batch(all_gt_j3ds, all_preds_j3d, all_vis_j3d)
         
         MPJPE = np.mean(errors) 

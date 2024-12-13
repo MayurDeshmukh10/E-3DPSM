@@ -9,6 +9,9 @@ import functools
 from tqdm import tqdm
 from pathlib import Path
 from natsort import natsorted
+from torch.nn.utils.rnn import pad_sequence
+from torch.utils.data.dataloader import default_collate
+import torch
 
                                                      
 h5py_File = functools.partial(h5py.File, libver='latest', swmr=True)
@@ -154,5 +157,59 @@ def generate_indices(dataset_root, datasets, shuffle=False, make_equal_len=False
 
     return generate_indices(dataset_root, datasets, shuffle, make_equal_len)
 
+def collate_variable_size(batch):
+    data_list = []
+    meta_list = []
+    events = []
+    
+    # Iterate over the batch of tuples
+    for item in batch:
+        data_list.append(item[0])
+        meta_list.append(item[1])
+    
+    for i, data in enumerate(data_list):
+        # ev = np.concatenate([data['x'], i*np.ones((len(data['x']),1), dtype=np.float32)],1)
+        ev = np.hstack([data['x'], i * np.ones((len(data['x']), 1), dtype=np.float32)])
+        events.append(ev)
 
+    # x_padded = pad_sequence([data['x'] for data in data_list], batch_first=True)
+    
+    # batch_size, max_len, feature_dim = x_padded.shape
 
+    # Create a column of indices for each sequence in the batch
+    # indices = torch.arange(1, batch_size+1, dtype=torch.float32).view(-1, 1, 1).expand(-1, max_len, 1)
+    # indices = torch.arange(0, batch_size, dtype=torch.float32).view(-1, 1, 1).expand(-1, max_len, 1)
+
+    # x_padded = torch.cat([x_padded, indices], dim=2)  # Concatenate along the feature dimension
+    # x_padded = x_padded.reshape(-1, 5)
+    # print(x_padded)
+
+    # events = torch.from_numpy(np.concatenate(events,0))
+    events = torch.from_numpy(np.vstack(events))
+    collated_data = {
+        'x': events,
+        'hms': torch.stack([item['hms'] for item in data_list]),
+        'weight': torch.stack([item['weight'] for item in data_list]),
+        'j3d': torch.stack([item['j3d'] for item in data_list]),
+        'j2d': torch.stack([item['j2d'] for item in data_list]),
+        'segmentation_mask': torch.stack([item['segmentation_mask'] for item in data_list])
+    }
+
+    # Collate the meta part
+    collated_meta = default_collate(meta_list)
+    # ego_to_global_space_np = np.array([item['ego_to_global_space'] for item in meta_list])
+    # ego_to_global_space = torch.tensor(ego_to_global_space_np)
+    # collated_meta = {
+    #     'j2d': torch.stack([item['j2d'] for item in meta_list]),
+    #     'j3d': torch.stack([item['j3d'] for item in meta_list]),
+    #     'vis_j2d': torch.stack([item['vis_j2d'] for item in meta_list]),
+    #     'vis_j3d': torch.stack([item['vis_j3d'] for item in meta_list]),
+    #     'valid_j3d': torch.stack([item['valid_j3d'] for item in meta_list]),
+    #     'frame_index': torch.tensor([item['frame_index'] for item in meta_list]),
+    #     'rgb_frame_index': torch.tensor([item['rgb_frame_index'] for item in meta_list]),
+    #     'scale_x': torch.tensor([item['scale_x'] for item in meta_list]),
+    #     'scale_y': torch.tensor([item['scale_y'] for item in meta_list]),
+    #     'valid_seg': torch.tensor([item['valid_seg'] for item in meta_list]),
+    #     'ego_to_global_space': ego_to_global_space
+    # }
+    return collated_data, collated_meta

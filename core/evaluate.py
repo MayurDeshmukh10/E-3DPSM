@@ -36,14 +36,17 @@ def accuracy(gt3ds, preds, valid_j3d):
     if isinstance(valid_j3d, torch.Tensor):
         valid_j3d = valid_j3d.detach().cpu().numpy()
 
-    gt3ds = gt3ds * valid_j3d
-    preds = preds * valid_j3d
+
+    gt3ds1 = gt3ds * valid_j3d
+    preds1 = preds * valid_j3d
+
+
 
     cnt = np.sum(valid_j3d)
     if cnt == 0:
         return 0, 0
     
-    joint_error = np.sqrt(np.sum((gt3ds - preds)**2, axis=-1))
+    joint_error = np.sqrt(np.sum((gt3ds1 - preds1)**2, axis=-1))
     joint_error = np.sum(joint_error) / cnt
     
     return joint_error, cnt

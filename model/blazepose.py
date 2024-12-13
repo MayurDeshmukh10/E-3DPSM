@@ -104,7 +104,7 @@ class BlazePose(nn.Module):
         self.joint_regressor_hms = JointRegressor(16, self.n_joints)
 
     def forward(self, x):        
-        H, W = x.shape[-2:]      
+        H, W = x.shape[-2:]
         B = x.shape[0]           
 
         x = self.conv1(x)
@@ -122,9 +122,12 @@ class BlazePose(nn.Module):
             x_seg = seg(x)
             x = torch.cat([x_seg, feature_maps[i]], dim=1)
         
-        seg_f = torch.sigmoid(self.segmentation_head(x)) 
+        # seg_f = torch.sigmoid(self.segmentation_head(x)) 
+        seg_f = self.segmentation_head(x) 
+
+        
                 
-        seg_f_detached = seg_f.detach().clone()        
+        seg_f_detached = torch.sigmoid(seg_f.detach().clone())
         seg_out = F.interpolate(seg_f, size=(H, W), mode='bilinear', align_corners=True)
 
         x = f5

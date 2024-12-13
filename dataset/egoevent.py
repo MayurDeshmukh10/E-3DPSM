@@ -6,7 +6,7 @@ from pathlib import Path
 from torch.utils.data import Dataset
 
 from dataset.Joints3DDataset import Joints3DDataset
-from dataset.representation import EROS, LNES, EventFrame
+from dataset.representation import EROS, LNES, EventFrame, RawEvent
 from dataset.egoevent_synthetic import SyntheticEventStream
 from dataset.egoevent_real import RealEventStream
 from dataset.dataset_utils import generate_path_split, generate_indices
@@ -22,6 +22,8 @@ def get_representation(cfg, width, height):
         repr = LNES(cfg, height, width)
     elif representation == 'EventFrame':
         repr = EventFrame(cfg, height, width)
+    elif representation == 'RawEvent':
+        repr = RawEvent(cfg, height, width)
     else:
         raise NotImplementedError
 
@@ -173,7 +175,8 @@ class EgoEvent(Dataset):
         print('Total number of events: ', self.total_length)
 
         self.indices = generate_indices(self.dataset_root, self.datasets)
-    
+        # self.indices = generate_indices(Path('/CT/EventEgo3Dv2/work/data'), self.datasets)
+
     def __len__(self):
         return self.total_length
 

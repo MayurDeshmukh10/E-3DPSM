@@ -11,6 +11,7 @@ import torch.utils.data.distributed
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import trange
 from rich import print
+import numpy as np
 
 from settings import config as cfg
 from core.loss import HeatMapJointsMSELoss, J3dMSELoss, SegmentationLoss
@@ -26,6 +27,8 @@ from dataset import AugmentedEgoEvent
 from dataset import CombinedEgoEvent
 from dataset import TemoralWrapper
 from model import EgoHPE
+from dataset.dataset_utils import collate_variable_size
+
 
 
 def main():
@@ -38,6 +41,11 @@ def main():
         cfg, TrainDataset.__name__, 'train')
 
     logger.info(cfg)
+
+    properties = torch.cuda.get_device_properties("cuda:0")
+
+    total_memory = properties.total_memory / (1024 ** 3)  # Convert bytes to GB
+    print(f"Total GPU memory: {total_memory:.2f} GB")
 
     # cudnn related setting
     cudnn.benchmark = cfg.CUDNN.BENCHMARK
@@ -79,8 +87,8 @@ def main():
     cfg.DATASET.TYPE = 'Real'    
     valid_dataset = EgoEvent(cfg, split='test')
 
-    train_dataset = TemoralWrapper(train_dataset, cfg.DATASET.TEMPORAL_STEPS, augment=True)
-    finetune_dataset = TemoralWrapper(finetune_dataset, cfg.DATASET.TEMPORAL_STEPS, augment=False)
+    # train_dataset = TemoralWrapper(train_dataset, cfg.DATASET.TEMPORAL_STEPS, augment=True)
+    # finetune_dataset = TemoralWrapper(finetune_dataset, cfg.DATASET.TEMPORAL_STEPS, augment=False)
 
     batch_size = cfg.BATCH_SIZE * cfg.N_GPUS
     n_workers = 0 if cfg.DEBUG.NO_MP else min(os.cpu_count(), batch_size)
@@ -94,6 +102,7 @@ def main():
     train_loader = torch.utils.data.DataLoader(
         train_dataset,
         batch_size=batch_size,
+        collate_fn=collate_variable_size,
         shuffle=True,
         num_workers=n_workers ,
         pin_memory=True
@@ -102,6 +111,7 @@ def main():
     finetune_loader = torch.utils.data.DataLoader(
         finetune_dataset,
         batch_size=batch_size,
+        collate_fn=collate_variable_size,
         shuffle=True,
         num_workers=n_workers ,
         pin_memory=True
@@ -110,6 +120,7 @@ def main():
     valid_loader = torch.utils.data.DataLoader(
         valid_dataset,
         batch_size=batch_size,
+        collate_fn=collate_variable_size,
         shuffle=False,
         num_workers=n_workers ,
         pin_memory=True

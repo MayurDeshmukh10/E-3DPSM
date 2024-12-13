@@ -68,25 +68,25 @@ class AugmentedEgoEvent(Dataset):
             
         data, meta = self.target_dataset[idx]
         
-        if self.is_train and random.random() < 0.5:            
-            if torch.sum(meta['vis_j3d']) != 0:
-                mask = data['segmentation_mask'][0].numpy()
-                mask = cv2.dilate(mask, np.ones((2, 2)), iterations=1)
-                bg_mask = ~mask.astype(bool)
+        # if self.is_train and random.random() < 0.5:            
+        #     if torch.sum(meta['vis_j3d']) != 0:
+        #         mask = data['segmentation_mask'][0].numpy()
+        #         mask = cv2.dilate(mask, np.ones((2, 2)), iterations=1)
+        #         bg_mask = ~mask.astype(bool)
 
-                # if 'start_index' in kwargs:
-                #     start_index = kwargs['start_index']
-                #     np.random.seed(start_index)
-                #     aidx = np.random.randint(0, self.index_len - 1 - 25) # 25 is the number of timesteps
-                #     aidx += kwargs['offset_index']  
-                # else:
-                aidx = np.random.randint(0, self.index_len - 1)
+        #         # if 'start_index' in kwargs:
+        #         #     start_index = kwargs['start_index']
+        #         #     np.random.seed(start_index)
+        #         #     aidx = np.random.randint(0, self.index_len - 1 - 25) # 25 is the number of timesteps
+        #         #     aidx += kwargs['offset_index']  
+        #         # else:
+        #         aidx = np.random.randint(0, self.index_len - 1)
                 
-                dataset_idx, sample_idx = self.indices[aidx]
-                bg_data, bg_meta = self.datasets[dataset_idx][sample_idx, kwargs]
+        #         dataset_idx, sample_idx = self.indices[aidx]
+        #         bg_data, bg_meta = self.datasets[dataset_idx][sample_idx, kwargs]
 
-                data['x'][:, bg_mask] += bg_data['x'][:, bg_mask]
-                data['x'].clamp_(0, 1)
+        #         data['x'][:, bg_mask] += bg_data['x'][:, bg_mask]
+        #         data['x'].clamp_(0, 1)
 
         return data, meta
 

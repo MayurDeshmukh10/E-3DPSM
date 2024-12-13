@@ -17,7 +17,7 @@ else:
     i = 1
     while True:
         try:
-            resource.setrlimit(resource.RLIMIT_NOFILE, (131072 / i, rlimit[1]))
+            resource.setrlimit(resource.RLIMIT_NOFILE, (int(131072 / i), rlimit[1]))
             break
         except ValueError:
             i += 1

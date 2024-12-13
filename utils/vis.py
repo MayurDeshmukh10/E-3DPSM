@@ -264,7 +264,7 @@ def generate_skeleton_image(gt_j3d, pred_j3d):
 
 
 def save_debug_3d_joints(config, inp, meta, gt_j3d, pred_j3d, prefix, writer, global_step):    
-    idx = np.random.randint(0, inp.shape[0])
+    idx = np.random.randint(0, int((1+inp[-1,-1]).item()))
     
     if isinstance(gt_j3d, torch.Tensor):
         gt_j3d = gt_j3d.detach().cpu().numpy()
@@ -309,9 +309,10 @@ def plot_heatmaps(image, heatmaps):
         hm = cv2.applyColorMap(hm, cv2.COLORMAP_JET)        
         hm_comp += hm
 
-    hm_comp = np.clip(hm_comp, 0, 255).astype(np.uint8)    
-    image = cv2.addWeighted(image, 0.5, hm_comp, 0.5, 0)
-
+    hm_comp = np.clip(hm_comp, 0, 255).astype(np.uint)
+    image = image.astype(np.uint)
+    image = cv2.addWeighted(image, 0.3, hm_comp, 0.7, 0)
+    image = image.astype(np.uint8)
     return image
 
 

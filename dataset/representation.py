@@ -131,6 +131,7 @@ class LNES:
             raise ValueError('Invalid data_batch shape')
 
         ts = ts.astype(np.float32)
+        
         ts = (ts[-1] - ts) * 1e-3 # microseconds to milliseconds 
         
         selected_indices = ts < windows_time_ms
@@ -245,5 +246,78 @@ class EventFrame:
         g = np.zeros((h, w, 1), dtype=np.uint8)
 
         ef = np.concatenate([r, g, b], axis=2).astype(np.uint8)
+
+        return ef
+    
+
+class RawEvent:
+    def __init__(self, cfg, height, width):
+        self.height = height
+        self.width = width
+
+        self.resize_transform = ResizeTransform(cfg, height, width)
+
+    def __call__(self, data_batch) -> Any:
+        if data_batch.shape[-1] == 6:
+            xs, ys, ts, ps, fs, segmentation = data_batch.T
+        elif data_batch.shape[-1] == 5:
+            xs, ys, ts, ps, fs = data_batch.T
+        elif data_batch.shape[-1] == 4:
+            xs, ys, ts, ps = data_batch.T
+        else:
+            raise ValueError('Invalid data_batch shape')
+        
+        # xs, ys = self.resize_transform(xs, ys)
+        # xs, ys = self.resize_transform(xs, ys)
+        # width, height = self.resize_transform.width, self.resize_transform.height
+
+        
+
+        ts = ts.astype(np.float32)
+        # print(ts)
+        # ts = (ts[-1] - ts) * 1e-3 # microseconds to milliseconds
+        # ts = ts * 1e-3 # microseconds to milliseconds 
+
+        xs, ys = self.resize_transform(xs, ys)
+        width, height = self.resize_transform.width, self.resize_transform.height
+
+        xs = xs.astype(np.int32)
+        ys = ys.astype(np.int32)
+        ps = ps.astype(np.int32)
+
+        events_tensor = np.stack([xs, ys, ts, ps], axis=1)
+
+        events_tensor = torch.tensor(events_tensor, dtype=torch.float32)
+        
+
+        data = {
+            'input': events_tensor,
+            'coord_x': xs,
+            'coord_y': ys,
+        }
+
+        if data_batch.shape[-1] >= 5:
+            data['frame_index'] = fs[-1]            
+        
+        if data_batch.shape[-1] == 6:
+            data['segmentation_indices'] = segmentation.astype(np.uint8)
+
+        return data
+
+    def visualize(cls, events_tensor, height, width):
+        if isinstance(events_tensor, torch.Tensor):
+            # ef = ef.permute(1, 2, 0)
+            events_tensor = events_tensor.cpu().numpy()
+
+        ef = np.zeros((height, width, 3), dtype=np.uint8)
+
+        # import pdb; pdb.set_trace()
+        xs, ys, _, ps, _ = events_tensor.T
+        xs = xs.astype(np.int32)
+        ys = ys.astype(np.int32)
+
+        # Mark positive polarity events in red and negative in blue
+        ef[ys, xs, 0] = (ps == 1) * 255  # Red channel for positive events
+        ef[ys, xs, 2] = (ps == 0) * 255  # Blue channel for negative events
 
         return ef

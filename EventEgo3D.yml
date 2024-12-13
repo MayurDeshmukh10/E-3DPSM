@@ -1,7 +1,8 @@
-name: EE3D_CVPR
+name: ee3dh100
 channels:
   - conda-forge
-  - defaults
+  - pytorch
+  - nvidia
 dependencies:
   - _libgcc_mutex=0.1=conda_forge
   - _openmp_mutex=4.5=2_gnu
@@ -20,7 +21,7 @@ dependencies:
   - ncurses=6.4=h59595ed_2
   - openssl=3.2.1=hd590300_0
   - pip=24.0=pyhd8ed1ab_0
-  - python=3.9.18=h0755675_1_cpython
+  - python=3.11
   - readline=8.2=h8228510_1
   - setuptools=69.1.1=pyhd8ed1ab_0
   - tk=8.6.13=noxft_h4845f30_101
@@ -96,7 +97,7 @@ dependencies:
     - nvidia-nccl-cu12==2.19.3
     - nvidia-nvjitlink-cu12==12.4.99
     - nvidia-nvtx-cu12==12.1.105
-    - ocam==0.1
+    # - ocam==0.1
     - open3d==0.18.0
     - opencv-python==4.9.0.80
     - packaging==23.2
@@ -133,9 +134,14 @@ dependencies:
     - tensorboard==2.16.2
     - tensorboard-data-server==0.7.2
     - threadpoolctl==3.3.0
-    - torch==2.0.1+cu117
-    - torchaudio==2.0.2+cu117
-    - torchvision==0.15.2+cu117
+    # - pytorch-cuda==11.7
+    # - pytorch==2.4.1
+    # - torchvision==0.19.1
+    # - torchaudio==2.4.1
+    # - pytorch-cuda==11.8
+    # - torch==2.0.1+cu117
+    # - torchaudio==2.0.2+cu117
+    # - torchvision==0.15.2+cu117
     - tqdm==4.66.2
     - traitlets==5.14.1
     - trimesh==4.1.8
@@ -147,4 +153,4 @@ dependencies:
     - werkzeug==3.0.1
     - widgetsnbextension==4.0.10
     - zipp==3.17.0
-prefix: /CT/AstroCap/work/miniconda3/envs/EE3D_CVPR
+prefix: /CT/EventEgo3Dv2/work/envs
