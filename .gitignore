@@ -3,17 +3,3 @@ scripts/error/
 scripts/outputs/
 scripts/logs/
 logs/
-
-extract_images.py
-generate_video.py
-model/blazebase_modified.py
-model/blazepose_modified.py
-output_images/
-output_vide_o.mp4
-output_video.mp4
-output_video_10x.mp4
-output_video_1fps.mp4
-output_video_20x.mp4
-output_video_5x.mp4
-scripts/extract_ds.sh
-scripts/process.sh
