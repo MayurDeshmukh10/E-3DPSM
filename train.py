@@ -87,8 +87,8 @@ def main():
     cfg.DATASET.TYPE = 'Real'    
     valid_dataset = EgoEvent(cfg, split='test')
 
-    # train_dataset = TemoralWrapper(train_dataset, cfg.DATASET.TEMPORAL_STEPS, augment=True)
-    # finetune_dataset = TemoralWrapper(finetune_dataset, cfg.DATASET.TEMPORAL_STEPS, augment=False)
+    train_dataset = TemoralWrapper(train_dataset, cfg.DATASET.TEMPORAL_STEPS, augment=True)
+    finetune_dataset = TemoralWrapper(finetune_dataset, cfg.DATASET.TEMPORAL_STEPS, augment=False)
 
     batch_size = cfg.BATCH_SIZE * cfg.N_GPUS
     n_workers = 0 if cfg.DEBUG.NO_MP else min(os.cpu_count(), batch_size)
@@ -156,8 +156,8 @@ def main():
     for epoch in trange(begin_epoch, cfg.TRAIN.END_EPOCH, desc='Epoch'):
         try:
             # # train for one epoch
-            train(cfg, train_loader, model, criterions, optimizer, epoch, final_output_dir, tb_log_dir, writer_dict, pretraining=True)
-            # train(cfg, finetune_loader, model, criterions, optimizer, epoch, final_output_dir, tb_log_dir, writer_dict, pretraining=False)
+            # train(cfg, train_loader, model, criterions, optimizer, epoch, final_output_dir, tb_log_dir, writer_dict, pretraining=True)
+            train(cfg, finetune_loader, model, criterions, optimizer, epoch, final_output_dir, tb_log_dir, writer_dict, pretraining=False)
 
             # # evaluate on validation set
             perf_indicator = validate(

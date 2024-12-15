@@ -22,6 +22,8 @@ import torch.nn as nn
 
 def create_logger(cfg, cfg_name, phase='train'):
     root_output_dir = Path(cfg.OUTPUT_DIR)
+
+    experiment_name = cfg.EXP_NAME
     # set up logger
     if not root_output_dir.exists():
         print('=> creating {}'.format(root_output_dir))
@@ -46,7 +48,7 @@ def create_logger(cfg, cfg_name, phase='train'):
     console = logging.StreamHandler()
     logging.getLogger('').addHandler(console)
 
-    tensorboard_log_dir = Path(cfg.LOG_DIR) / model / (cfg_name + '_' + time_str)
+    tensorboard_log_dir = Path(cfg.LOG_DIR) / model / (cfg_name + '_' + time_str + '_' + experiment_name)
     print('=> creating {}'.format(tensorboard_log_dir))
     tensorboard_log_dir.mkdir(parents=True, exist_ok=True)
     

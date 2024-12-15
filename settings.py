@@ -41,7 +41,7 @@ config.MODEL.CHECKPOINT_PATH = os.getenv('CHECKPOINT_PATH', '')
 # DATASET related params
 config.DATASET = edict()
 
-config.DATASET.TEMPORAL_STEPS = 1
+config.DATASET.TEMPORAL_STEPS = 5
 config.TRAIN_ITERATIONS_PER_EPOCH = 10000
 
 config.DATASET.TYPE = 'Synthetic'
@@ -107,6 +107,7 @@ config.LOG_DIR = './logs/tensorboard'
 config.DATA_DIR = ''
 config.GPUS = '0'
 config.WORKERS = 8
+config.EXP_NAME = os.getenv('EXP_NAME', 'default')
 
 # Cudnn related params
 config.CUDNN = edict()

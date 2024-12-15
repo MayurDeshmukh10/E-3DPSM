@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 scaler = GradScaler()
 
-def compute_fn(model, batch, prev_buffer=None, prev_key=None, batch_first=False):
+def compute_fn(model, batch, prev_buffer=None, prev_key=None, prev_states=None, batch_first=False):
     inps = []
     new_inps = []
     frame_index = []
@@ -33,118 +33,104 @@ def compute_fn(model, batch, prev_buffer=None, prev_key=None, batch_first=False)
     valid_j3d = []
     valid_seg = []
 
-    data = batch[0]
-    meta = batch[1]
-    # for (data, meta) in batch:
-    #     inp = data['x']
-    #     inps.append(inp[None, ...])
-    #     new_inps.append(inp)
 
-    #     gt_hms_ = data['hms']
-    #     gt_j3d_ = data['j3d'] 
-    #     gt_seg_ = data['segmentation_mask']
+    data_batch = batch[0]
+    meta_batch = batch[1]
 
-    #     gt_j2d_ = meta['j2d']
+    # import pdb; pdb.set_trace()
 
-    #     vis_j2d_ = meta['vis_j2d']
-    #     vis_j3d_ = meta['vis_j3d']
-    #     valid_j3d_ = meta['valid_j3d']
-    #     valid_seg_ = meta['valid_seg']
-    #     frame_index_ = meta['frame_index']
+    for i in range(5):
+        inps_t = []
+        # frame_index_t = []
+        gt_hms_t = []
+        gt_j2d_t = []
+        gt_j3d_t = []
+        gt_seg_t = []
+        vis_j2d_t = []
+        vis_j3d_t = []
+        valid_j3d_t = []
+        valid_seg_t = []
+        for data, meta in zip(data_batch, meta_batch):
+            inp = data['x'][i]
+            # inp = torch.from_numpy(inp)
+
+            # print(f"For step {i}, shape of input is {inp.shape}")
+            
+            inps_t.append(inp)
+
+            gt_hms_ = data['hms'][i]
+            gt_j3d_ = data['j3d'][i]
+            gt_seg_ = data['segmentation_mask'][i]
+
+            gt_j2d_ = meta['j2d'][i]
+
+            vis_j2d_ = meta['vis_j2d'][i]
+            vis_j3d_ = meta['vis_j3d'][i]
+            valid_j3d_ = meta['valid_j3d'][i]
+            valid_seg_ = meta['valid_seg'][i]
+            frame_index_ = meta['frame_index'][i]
+
+            gt_hms.append(gt_hms_)
+            gt_j3d.append(gt_j3d_)
+            gt_seg.append(gt_seg_)
+
+            gt_j2d.append(gt_j2d_)
+            vis_j2d.append(vis_j2d_)
+            vis_j3d.append(vis_j3d_)
+            valid_j3d.append(valid_j3d_)
+            valid_seg.append(valid_seg_)
+
+            frame_index.append(frame_index_)
         
+        max_rows = max([inp.shape[0] for inp in inps_t])
+        padding_value = torch.tensor([-10, -10, -10, -10], dtype=torch.float32)
+        padded_inps_t = [
+            torch.cat([inp, padding_value.repeat(max_rows - inp.shape[0], 1)], dim=0)
+            for inp in inps_t
+        ]
+        inps.append(torch.stack(padded_inps_t).cuda())
+        
+        # inps.append(torch.cat(inps_t, dim=0).cuda())
+        # gt_hms.append(torch.cat(gt_hms_t, dim=0).cuda())
+        # gt_j3d.append(torch.cat(gt_j3d_t, dim=0).cuda())
+        # gt_seg.append(torch.cat(gt_seg_t, dim=0).cuda())
 
-    #     gt_hms.append(gt_hms_)
-    #     gt_j3d.append(gt_j3d_)
-    #     gt_seg.append(gt_seg_)
+        # gt_j2d.append(torch.cat(gt_j2d_t, dim=0).cuda())
+        # vis_j2d.append(torch.cat(vis_j2d_t, dim=0).cuda())
+        # vis_j3d.append(torch.cat(vis_j3d_t, dim=0).cuda())
+        # valid_j3d.append(torch.cat(valid_j3d_t, dim=0).cuda())
 
-    #     gt_j2d.append(gt_j2d_)
-    #     vis_j2d.append(vis_j2d_)
-    #     vis_j3d.append(vis_j3d_)
-    #     valid_j3d.append(valid_j3d_)
-    #     valid_seg.append(valid_seg_)
+    max_rows = max([inp.shape[1] for inp in inps])
+    padding_value = torch.tensor([-10, -10, -10, -10], dtype=torch.float32).cuda()
+    temp = []
+    for ip in inps:
+        aa = [
+                torch.cat([i, padding_value.repeat(max_rows - i.shape[0], 1)], dim=0)
+                for i in ip
+            ]
+        temp.append(torch.stack(aa).cuda())
 
-    #     frame_index.append(frame_index_)
+    inps = torch.stack(temp).cuda()
 
-    # del batch
+    gt_hms = torch.stack(gt_hms).cuda()
+    gt_j3d = torch.stack(gt_j3d).cuda()
+    gt_seg = torch.stack(gt_seg).cuda()
 
-    inp = data['x'].cuda()
-    # print("INP : ", inp)
+    gt_j2d = torch.stack(gt_j2d).cuda()
+
     # import pdb; pdb.set_trace()
-    gt_hms = data['hms'].cuda()
-    gt_j3d = data['j3d'].cuda()
-    gt_seg = data['segmentation_mask'].cuda()
-
-    gt_j2d = meta['j2d'].cuda()
-    vis_j2d = meta['vis_j2d'].cuda()
-    vis_j3d = meta['vis_j3d'].cuda()
-    valid_j3d = meta['valid_j3d'].cuda()
-    valid_seg = meta['valid_seg'].cuda()
-    frame_index = meta['frame_index'].cuda()
-
-
-
-    # gt_j3d.append(gt_j3d_)
-    # gt_seg.append(gt_seg_)
-
-    # gt_j2d.append(gt_j2d_)
-    # vis_j2d.append(vis_j2d_)
-    # vis_j3d.append(vis_j3d_)
-    # valid_j3d.append(valid_j3d_)
-    # valid_seg.append(valid_seg_)
-
-    # frame_index.append(frame_index_)
-
-    # max_size = [max([inp.shape[i] for inp in inps]) for i in range(1, inps[0].dim())]
-
-    # # Pad tensors in `inps` to match the maximum size
-    # padded_inps = []
-    # for inp in inps:
-    #     pad = [(0, max_size[dim - 1] - inp.shape[dim]) for dim in range(1, len(max_size) + 1)]
-    #     pad = [item for sublist in pad for item in sublist]  # Flatten list for torch.nn.functional.pad
-    #     padded_inp = torch.nn.functional.pad(inp, pad)
-    #     padded_inps.append(padded_inp)
-
-    # # import pdb; pdb.set_trace()
-    # # inps = torch.cat(inps, dim=0).cuda()
-    # inps = torch.cat(padded_inps, dim=0).cuda()
-    # import pdb; pdb.set_trace()
-
-
-    # gt_hms = torch.cat(gt_hms, dim=0).cuda()
-    # gt_j3d = torch.cat(gt_j3d, dim=0).cuda()
-    # gt_seg = torch.cat(gt_seg, dim=0).cuda()
-
-    # gt_j2d = torch.cat(gt_j2d, dim=0).cuda()
-    # vis_j2d = torch.cat(vis_j2d, dim=0).cuda()
-    # vis_j3d = torch.cat(vis_j3d, dim=0).cuda()
-    # valid_j3d = torch.cat(valid_j3d, dim=0).cuda()
+    vis_j2d = torch.stack(vis_j2d).cuda()
+    vis_j3d = torch.stack(vis_j3d).cuda()
+    valid_j3d = torch.stack(valid_j3d).cuda()
+    valid_seg = torch.cat([v.unsqueeze(0) for v in valid_seg]).cuda()
     # valid_seg = torch.cat(valid_seg, dim=0).cuda()
+    frame_index = torch.cat([v.unsqueeze(0) for v in frame_index], dim=0).cuda()
     # frame_index = torch.cat(frame_index, dim=0).cuda()
-
-    # import pdb; pdb.set_trace()
-
-    # inps = data['x']
-    # inps = inps.unsqueeze(0).cuda()
-
-    # gt_hms = data['hms'].cuda()
-    # gt_j3d = data['j3d'].cuda()
-    # gt_seg = data['segmentation_mask'].cuda()
-    # gt_j2d = data['j2d'].cuda()
     
-    # vis_j2d = meta['vis_j2d'].cuda()
-    # vis_j3d = meta['vis_j3d'].cuda()
-    # valid_j3d = meta['valid_j3d'].cuda()
-    # valid_seg = meta['valid_seg'].cuda()
-    # frame_index = meta['frame_index'].cuda()
-    
-    outputs = model(inp, prev_buffer, prev_key, batch_first)
+    outputs = model(inps, prev_buffer, prev_key, prev_states, batch_first)
 
-    # import pdb; pdb.set_trace()
-    
-    # T, B, C, H, W = inps.shape
-    # N, C = inp.shape
-    # B = int((1+inp[-1,-1]).item())
-    return inp, outputs, gt_hms, gt_j3d, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index
+    T, B, N, C = inps.shape
+    return inps.view(T * B, N, C), outputs, gt_hms, gt_j3d, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index
 
 def percentile(t, q):
     B, C, H, W = t.shape
@@ -244,12 +230,12 @@ def train(config, train_loader, model, criterions, optimizer, epoch, output_dir,
         scaler.update()
         optimizer.zero_grad()
 
-        B = int((1+inp[-1,-1]).item())
-        hms_losses.update(loss_hms.item(), B)
-        seg_losses.update(loss_seg.item(), B)
-        j3d_losses.update(loss_j3d.item(), B)
+        # B = int((1+inp[-1,-1]).item())
+        hms_losses.update(loss_hms.item(), inp.size(0))
+        seg_losses.update(loss_seg.item(), inp.size(0))
+        j3d_losses.update(loss_j3d.item(), inp.size(0))
 
-        losses.update(loss.item(), B)
+        losses.update(loss.item(), inp.size(0))
         
         avg_acc, cnt = accuracy(gt_j3d, pred_j3d, valid_j3d)
         acc.update(avg_acc, cnt)

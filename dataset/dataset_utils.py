@@ -158,45 +158,55 @@ def generate_indices(dataset_root, datasets, shuffle=False, make_equal_len=False
     return generate_indices(dataset_root, datasets, shuffle, make_equal_len)
 
 def collate_variable_size(batch):
-    data_list = []
-    meta_list = []
-    events = []
     
+    final_data_list = []
+    final_meta_list = []
     # Iterate over the batch of tuples
-    for item in batch:
-        data_list.append(item[0])
-        meta_list.append(item[1])
+
+    # print("batch len : ", len(batch))
+    for i, items in enumerate(batch):
+        data_list = []
+        meta_list = []
+        events = []
+        for item in items:
+            data_list.append(item[0])
+            meta_list.append(item[1])
     
-    for i, data in enumerate(data_list):
-        # ev = np.concatenate([data['x'], i*np.ones((len(data['x']),1), dtype=np.float32)],1)
-        ev = np.hstack([data['x'], i * np.ones((len(data['x']), 1), dtype=np.float32)])
-        events.append(ev)
+        # print('data_list', len(data_list))
+        for _, data in enumerate(data_list):
+            # ev = np.concatenate([data['x'], i*np.ones((len(data['x']),1), dtype=np.float32)],1)
+            # ev = np.hstack([data['x'], i * np.ones((len(data['x']), 1), dtype=np.float32)])
+            events.append(data['x'])
 
-    # x_padded = pad_sequence([data['x'] for data in data_list], batch_first=True)
-    
-    # batch_size, max_len, feature_dim = x_padded.shape
+        # x_padded = pad_sequence([data['x'] for data in data_list], batch_first=True)
+        
+        # batch_size, max_len, feature_dim = x_padded.shape
 
-    # Create a column of indices for each sequence in the batch
-    # indices = torch.arange(1, batch_size+1, dtype=torch.float32).view(-1, 1, 1).expand(-1, max_len, 1)
-    # indices = torch.arange(0, batch_size, dtype=torch.float32).view(-1, 1, 1).expand(-1, max_len, 1)
+        # Create a column of indices for each sequence in the batch
+        # indices = torch.arange(1, batch_size+1, dtype=torch.float32).view(-1, 1, 1).expand(-1, max_len, 1)
+        # indices = torch.arange(0, batch_size, dtype=torch.float32).view(-1, 1, 1).expand(-1, max_len, 1)
 
-    # x_padded = torch.cat([x_padded, indices], dim=2)  # Concatenate along the feature dimension
-    # x_padded = x_padded.reshape(-1, 5)
-    # print(x_padded)
+        # x_padded = torch.cat([x_padded, indices], dim=2)  # Concatenate along the feature dimension
+        # x_padded = x_padded.reshape(-1, 5)
+        # print(x_padded)
 
-    # events = torch.from_numpy(np.concatenate(events,0))
-    events = torch.from_numpy(np.vstack(events))
-    collated_data = {
-        'x': events,
-        'hms': torch.stack([item['hms'] for item in data_list]),
-        'weight': torch.stack([item['weight'] for item in data_list]),
-        'j3d': torch.stack([item['j3d'] for item in data_list]),
-        'j2d': torch.stack([item['j2d'] for item in data_list]),
-        'segmentation_mask': torch.stack([item['segmentation_mask'] for item in data_list])
-    }
+        # events = torch.from_numpy(np.concatenate(events,0))
+        # events = torch.from_numpy(np.vstack(events))
+        # events = torch.from_numpy(events)
+        collated_data = {
+            'x': events,
+            'hms': torch.stack([item['hms'] for item in data_list]),
+            'weight': torch.stack([item['weight'] for item in data_list]),
+            'j3d': torch.stack([item['j3d'] for item in data_list]),
+            'j2d': torch.stack([item['j2d'] for item in data_list]),
+            'segmentation_mask': torch.stack([item['segmentation_mask'] for item in data_list])
+        }
 
-    # Collate the meta part
-    collated_meta = default_collate(meta_list)
+        # Collate the meta part
+        collated_meta = default_collate(meta_list)
+        final_data_list.append(collated_data)
+        final_meta_list.append(collated_meta)
+
     # ego_to_global_space_np = np.array([item['ego_to_global_space'] for item in meta_list])
     # ego_to_global_space = torch.tensor(ego_to_global_space_np)
     # collated_meta = {
@@ -212,4 +222,7 @@ def collate_variable_size(batch):
     #     'valid_seg': torch.tensor([item['valid_seg'] for item in meta_list]),
     #     'ego_to_global_space': ego_to_global_space
     # }
-    return collated_data, collated_meta
+    # return collated_data, collated_meta
+    # print('final_data_list', len(final_data_list))
+    # print('final_meta_list', len(final_meta_list))
+    return final_data_list, final_meta_list

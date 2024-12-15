@@ -2,6 +2,7 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 from .blazepose import BlazePose
+from .base import Event3DPoseNet
 from os.path import join, dirname, isfile
 import numpy as np
 
@@ -92,23 +93,23 @@ class QuantizationLayer(nn.Module):
 
     def forward(self, events):
 
-        B = self.batch_size
+        # B = self.batch_size
+        B = 1
 
         num_voxels = int(2 * np.prod(self.dim) * B)
         vox = events[0].new_full([num_voxels,], fill_value=0)
+
+        # import pdb; pdb.set_trace()
         C, H, W = self.dim
 
         x, y, t, p, b = events.t()
 
         
-        current_batch = torch.unique(events[:, 4], sorted=True).tolist()
-        for bi in current_batch:
-            # try:
-            t[events[:,-1] == bi] /= t[events[:,-1] == bi].max()
-            # except: # if there are no events for this batch
-            #     import pdb; pdb.set_trace()
-            #     print("Error in normalizing timestamps")
-            #     pass
+        # current_batch = torch.unique(events[:, 4], sorted=True).tolist()
+        # import pdb; pdb.set_trace()
+        qq = b.unique()
+        # for bi in range(B):
+        t[events[:,-1] == qq] /= t[events[:,-1] == qq].max()
 
         p = (p+1)/2  # maps polarity to 0, 1
 
@@ -181,12 +182,11 @@ class QuantizationLayer(nn.Module):
     
         #     vox.put_(idx.long(), values, accumulate=True)
 
-        # import pdb; pdb.set_trace()
-
         x_idx = x
         y_idx = W * y
         channel_offset = W * H * C * p
-        batch_offset = W * H * C * 2 * b
+        # batch_offset = W * H * C * 2 * b
+        batch_offset = 0
 
         # Summing to get final index
         idx_before_bins = x_idx + y_idx + channel_offset + batch_offset
@@ -262,7 +262,7 @@ class EROS(nn.Module):
         super(EROS, self).__init__()
 
         self.quantization_layer = QuantizationLayer(
-            dim=(int(inp_chn/2), height, width),
+            dim=(9, height, width),
             mlp_layers=[1, 30, 30, 1],  # test and change if necessary
             activation=nn.LeakyReLU(negative_slope=0.1),
             batch_size=batch_size
@@ -273,7 +273,22 @@ class EROS(nn.Module):
         self.height = height
         
     def forward(self, buffer, events, key):
-        quantized_events = self.quantization_layer(events)
+        # import pdb; pdb.set_trace()
+        quantized_events = []
+        for i, event_batch in enumerate(events):
+            valid_mask = ~(event_batch == -10).all(dim=1)
+            event_batch = event_batch[valid_mask]
+            event_batch = event_batch.cpu().numpy()
+            event_batch = np.hstack([event_batch, i * np.ones((len(event_batch), 1), dtype=np.float32)])
+            event_batch = torch.from_numpy(event_batch).to(events.device)
+            # print(f"Event batch shape: {event_batch.shape}")
+            quantized_events_batch = self.quantization_layer(event_batch)
+            quantized_events.append(quantized_events_batch)
+        
+        quantized_events = torch.stack(quantized_events, dim=0)
+
+        quantized_events = quantized_events.squeeze(1)
+
         # quantized_events = crop_and_resize_to_resolution(quantized_events, (self.height, self.width))
         _, _, height, width = quantized_events.shape
             
@@ -299,7 +314,8 @@ class EgoHPE(nn.Module):
 
         self.n_joints = config.NUM_JOINTS
         
-        self.blaze_pose = BlazePose(config)
+        # self.blaze_pose = BlazePose(config)
+        self.event_3d_posenet = Event3DPoseNet(config)
 
         self.enable_eros = config.EROS
         self.inp_chn = config.MODEL.INPUT_CHANNEL
@@ -312,11 +328,18 @@ class EgoHPE(nn.Module):
 
         self.EROS = EROS(inp_chn=self.inp_chn, kernel_size=kernal_size, height=self.height, width=self.width, initial_decay_base=decay_base, batch_size=self.batch_size)
         
-    def forward(self, x, prev_buffer=None, prev_key=None, batch_first=False):
+    def forward(self, x, prev_buffer=None, prev_key=None, prev_states=None, batch_first=False):
+        if batch_first:
+            x = x.permute(1, 0, 2, 3, 4)
 
         buffer = prev_buffer
+
+        # import pdb; pdb.set_trace() 
+
+        T, B, N, C = x.shape
         
         if buffer is None:
+            # buffer = torch.zeros_like(x[0, :, :, :, :])
             buffer = torch.zeros(self.batch_size, self.inp_chn, self.height, self.width).to(x.device)
         
         key = prev_key
@@ -333,31 +356,36 @@ class EgoHPE(nn.Module):
         confidences = []
         buffers = []
 
-        if self.enable_eros:
-            out, confidence, buffer, representation = self.EROS(buffer, x, key)        
-        else:
-            out = x
+        for i in range(T):
+            if self.enable_eros:
+                out, confidence, buffer, representation = self.EROS(buffer, x[i], key)        
+            else:
+                out = x[i]
 
-        buffers.append(buffer)
-        confidences.append(confidence)
+            buffers.append(buffer)
+            confidences.append(confidence)
 
+            # outs = self.blaze_pose(out)
 
-        outs = self.blaze_pose(out)
+            
+            outs = self.event_3d_posenet(out, prev_states)
 
-        buffer = out
+            prev_states = outs['prev_states']
 
-        x_hms = outs['hms']
-        j3d = outs['j3d']
-                                
-        seg_out = outs['seg']
-        seg_feature = outs['seg_feature']
-        
-        key = seg_feature
-        
-        eross.append(buffer)
-        x_hmss.append(x_hms)
-        j3ds.append(j3d)
-        seg_outs.append(seg_out)
+            buffer = out
+
+            x_hms = outs['hms']
+            j3d = outs['j3d']
+                                    
+            seg_out = outs['seg']
+            seg_feature = outs['seg_feature']
+            
+            key = seg_feature
+            
+            eross.append(buffer)
+            x_hmss.append(x_hms)
+            j3ds.append(j3d)
+            seg_outs.append(seg_out)
 
         if prev_buffer is not None:
             prev_buffer.copy_(buffer)
@@ -383,6 +411,7 @@ class EgoHPE(nn.Module):
         outputs['confidence'] = confidences
         outputs['buffer'] = buffers
         outputs['representation'] = representation
+        outputs['prev_states'] = prev_states
  
         return outputs
 
