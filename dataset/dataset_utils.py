@@ -168,7 +168,11 @@ def collate_variable_size(batch):
         data_list = []
         meta_list = []
         events = []
+        if type(items) is tuple:
+            items = [items] 
+        # print("len ", type(items))
         for item in items:
+            # print('item', item[0].shape)
             data_list.append(item[0])
             meta_list.append(item[1])
     

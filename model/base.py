@@ -120,12 +120,14 @@ class Event3DPoseNet(nn.Module):
             BlazeBlock(128, 192, 6),
         ])
 
-        self.s5_blocks = nn.ModuleList([
-            S5Block(dim=32, state_dim=32, bidir=False, bandlimit=0.5),
-            S5Block(dim=64, state_dim=64, bidir=False, bandlimit=0.5),
-            S5Block(dim=128, state_dim=128, bidir=False, bandlimit=0.5),
-            S5Block(dim=192, state_dim=192, bidir=False, bandlimit=0.5),
-        ])
+        # self.s5_blocks = nn.ModuleList([
+        #     # S5Block(dim=32, state_dim=32, bidir=False, bandlimit=0.5),
+        #     # S5Block(dim=64, state_dim=64, bidir=False, bandlimit=0.5),
+        #     # S5Block(dim=128, state_dim=128, bidir=False, bandlimit=0.5),
+        #     S5Block(dim=192, state_dim=192, bidir=False, bandlimit=0.5),
+        # ])
+
+        self.s5_block = S5Block(dim=192, state_dim=192, bidir=False, bandlimit=0.5)
 
         self.heatmap_decoder = nn.ModuleList([
             DecoderConv(192, 192, 2),
@@ -163,48 +165,67 @@ class Event3DPoseNet(nn.Module):
         feature_maps = {}
         states_store = {}
 
-        if states is None:
-            initial_states = []
-            for s5_block in self.s5_blocks:
-                # s5_block.s5.initial_state
-                # states = s5_block.s5.initial_state(
-                #     batch_size=B * 48 * 64
-                # ).to(x.device)
+        # if states is None:
+        #     initial_states = []
+        #     for s5_block in self.s5_blocks:
+        #         # s5_block.s5.initial_state
+        #         # states = s5_block.s5.initial_state(
+        #         #     batch_size=B * 48 * 64
+        #         # ).to(x.device)
 
-                initial_states.append(None)
-            states = initial_states
+        #         initial_states.append(-10)
+        #     # import pdb; pdb.set_trace()
+        #     initial_states[-1] = 10 # some random value
+        #     states = initial_states
         
         input = x
+
         for i in range(self.num_bins):
             
             x_bin = input[:, i*2:(i+1)*2, :, :]
             x = self.conv1(x_bin)
-            # import pdb; pdb.set_trace()
             feature_maps[i] = []
 
             internal_states = []
-            for blaze_block, s5_block, block_state in zip(self.backbone1, self.s5_blocks, states):
-                # import pdb; pdb.set_trace()
+            for blaze_block in self.backbone1:
                 x = blaze_block(x)
-                h_new, w_new = x.shape[-2:]
-                if block_state is None:
-                    block_state = s5_block.s5.initial_state(
-                        batch_size=B * h_new * w_new
-                    ).to(x.device)
-
-                x = rearrange(x, "B C H W -> (B H W) 1 C")
-                x, current_block_state = s5_block(x, block_state)
-                x = rearrange(
-                    x, "(B H W) 1 C -> B C H W", B=B, H=int(h_new), W=int(w_new)
-                )
                 feature_maps[i].append(x)
                 # feature_maps.append(x)
-                internal_states.append(current_block_state)
+                # internal_states.append(current_block_state)
 
-            states = internal_states
-            states_store[i] = states
+            
+            x = feature_maps[i][-1]
+            h_new, w_new = x.shape[-2:]
+            if states is None:
+                states = self.s5_block.s5.initial_state(
+                    batch_size=B * h_new * w_new
+                ).to(x.device)
+            else:
+                states = rearrange(states, "B C H W -> (B H W) C")
+
+            x = rearrange(x, "B C H W -> (B H W) 1 C")
+
+
+            x, states = self.s5_block(x, states)
+
+            states = states.detach()
+            # memory_stats = torch.cuda.memory_stats("cuda:0")
+            # print(f"Peak reserved memory: {memory_stats['reserved_bytes.all.peak'] / (1024 ** 2):.2f} MB")
+            x = rearrange(
+                x, "(B H W) 1 C -> B C H W", B=B, H=int(h_new), W=int(w_new)
+            )
+            states = rearrange(states, "(B H W) C -> B C H W", H=h_new, W=w_new)
+
+            # state = current_block_state
+            # states_store[i] = states
+
 
         # import pdb; pdb.set_trace()
+        
+        final_state = states
+        
+        # temp = [v.detach() for k, v in states_store.items()]
+
         last_layer_features = feature_maps[self.num_bins - 1][-1]
         final_feature_maps = feature_maps[self.num_bins - 1][::-1]
 
@@ -237,14 +258,15 @@ class Event3DPoseNet(nn.Module):
         
         j3d = self.joint_regressor_hms(hms_out)
 
-        final_states = states_store[self.num_bins - 1]
+        # final_states = states_store[self.num_bins - 1]
 
         return {
             'j3d': j3d,
             'hms': hms_out,
             'seg': seg_out,
             'seg_feature': seg_f_detached,
-            'prev_states': final_states
+            'prev_states': final_state
+            # 'states_store': states_store
         }
 
         

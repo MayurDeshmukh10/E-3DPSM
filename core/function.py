@@ -16,11 +16,13 @@ from torch.nn.utils.rnn import pad_sequence
 import torchvision
 from torch.cuda.amp import autocast, GradScaler
 
+from torch.profiler import profile, ProfilerActivity
+
 logger = logging.getLogger(__name__)
 
 scaler = GradScaler()
 
-def compute_fn(model, batch, prev_buffer=None, prev_key=None, prev_states=None, batch_first=False):
+def compute_fn(model, batch, temporal_steps, prev_buffer=None, prev_key=None, prev_states=None, batch_first=False):
     inps = []
     new_inps = []
     frame_index = []
@@ -37,9 +39,11 @@ def compute_fn(model, batch, prev_buffer=None, prev_key=None, prev_states=None, 
     data_batch = batch[0]
     meta_batch = batch[1]
 
-    # import pdb; pdb.set_trace()
+    if len(data_batch[0]['x']) < temporal_steps:
+        temporal_steps = 1
+        # import pdb; pdb.set_trace()
 
-    for i in range(5):
+    for i in range(temporal_steps):
         inps_t = []
         # frame_index_t = []
         gt_hms_t = []
@@ -88,7 +92,7 @@ def compute_fn(model, batch, prev_buffer=None, prev_key=None, prev_states=None, 
             torch.cat([inp, padding_value.repeat(max_rows - inp.shape[0], 1)], dim=0)
             for inp in inps_t
         ]
-        inps.append(torch.stack(padded_inps_t).cuda())
+        inps.append(torch.stack(padded_inps_t))
         
         # inps.append(torch.cat(inps_t, dim=0).cuda())
         # gt_hms.append(torch.cat(gt_hms_t, dim=0).cuda())
@@ -101,16 +105,16 @@ def compute_fn(model, batch, prev_buffer=None, prev_key=None, prev_states=None, 
         # valid_j3d.append(torch.cat(valid_j3d_t, dim=0).cuda())
 
     max_rows = max([inp.shape[1] for inp in inps])
-    padding_value = torch.tensor([-10, -10, -10, -10], dtype=torch.float32).cuda()
+    padding_value = torch.tensor([-10, -10, -10, -10], dtype=torch.float32)
     temp = []
     for ip in inps:
         aa = [
                 torch.cat([i, padding_value.repeat(max_rows - i.shape[0], 1)], dim=0)
                 for i in ip
             ]
-        temp.append(torch.stack(aa).cuda())
+        temp.append(torch.stack(aa))
 
-    inps = torch.stack(temp).cuda()
+    inps = torch.stack(temp)
 
     gt_hms = torch.stack(gt_hms).cuda()
     gt_j3d = torch.stack(gt_j3d).cuda()
@@ -127,7 +131,8 @@ def compute_fn(model, batch, prev_buffer=None, prev_key=None, prev_states=None, 
     frame_index = torch.cat([v.unsqueeze(0) for v in frame_index], dim=0).cuda()
     # frame_index = torch.cat(frame_index, dim=0).cuda()
     
-    outputs = model(inps, prev_buffer, prev_key, prev_states, batch_first)
+    # print("Inps shape: ", inps.shape)
+    outputs = model(inps, prev_buffer, prev_key, batch_first)
 
     T, B, N, C = inps.shape
     return inps.view(T * B, N, C), outputs, gt_hms, gt_j3d, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index
@@ -140,18 +145,39 @@ def percentile(t, q):
 
 def create_image(representation):
     B, C, H, W = representation.shape
-    representation = representation.view(B, 3, C // 3, H, W).sum(2)
+    # import pdb; pdb.set_trace()
 
-    # Perform robust min-max normalization
-    robust_max_vals = percentile(representation, 95)
-    robust_min_vals = percentile(representation, 5)
+    representation = representation[:, 8*2:(8+1)*2, :, :]
+    if isinstance(representation, torch.Tensor):
+        representation = representation.permute(0, 3, 2, 1)
+        representation = representation.cpu().numpy()
 
-    representation = (representation - robust_min_vals) / (robust_max_vals - robust_min_vals)
-    representation = torch.clamp(representation, 0, 1)
+    representation = representation * 255
+    representation = representation.astype(np.uint8)
 
-    # Apply gamma correction
-    gamma = 0.5
-    representation = representation ** gamma
+    B, h, w, _ = representation.shape
+    
+    r = representation[..., :1]
+    b = representation[..., 1:]
+    g = np.zeros((B, h, w, 1), dtype=np.uint8)
+
+    # import pdb; pdb.set_trace()
+
+    representation = np.concatenate([r, g, b], axis=-1).astype(np.uint8)
+
+    representation = torch.from_numpy(representation).permute(0, 3, 2, 1).to(torch.float32).cuda()
+    # representation = representation.view(B, 3, C // 3, H, W).sum(2)
+
+    # # Perform robust min-max normalization
+    # robust_max_vals = percentile(representation, 95)
+    # robust_min_vals = percentile(representation, 5)
+
+    # representation = (representation - robust_min_vals) / (robust_max_vals - robust_min_vals)
+    # representation = torch.clamp(representation, 0, 1)
+
+    # # Apply gamma correction
+    # gamma = 0.5
+    # representation = representation ** gamma
 
     return representation
 
@@ -170,6 +196,17 @@ def create_image(representation):
 
 #     return representation
 
+def recursive_detach(inp):
+    if isinstance(inp, torch.Tensor):
+        return inp.detach()
+    if isinstance(inp, list):
+        return [recursive_detach(x) for x in inp]
+    if isinstance(inp, tuple):
+        return tuple([recursive_detach(x) for x in inp])
+    if isinstance(inp, dict):
+        return {k: recursive_detach(v) for k, v in inp.items()}
+    raise NotImplementedError
+
 def train(config, train_loader, model, criterions, optimizer, epoch, output_dir, tb_log_dir, writer_dict, pretraining=True):
     batch_time = AverageMeter()
     data_time = AverageMeter()
@@ -186,7 +223,12 @@ def train(config, train_loader, model, criterions, optimizer, epoch, output_dir,
     model.train()
 
     end = time.time()
+
+    temporal_steps = config.DATASET.TEMPORAL_STEPS
+
     for i, batch in enumerate(train_loader):
+
+    
         if i > config.TRAIN_ITERATIONS_PER_EPOCH: break
 
         data_time.update(time.time() - end)
@@ -199,9 +241,20 @@ def train(config, train_loader, model, criterions, optimizer, epoch, output_dir,
             print(e)
             continue
             
+
+        # logger.info("Batch shape: {}".format(inp.shape))
+        memory_stats = torch.cuda.memory_stats("cuda:0")
+        # logger.info("Before model")
+        # logger.info(f"Current allocated memory: {memory_stats['allocated_bytes.all.current'] / (1024 ** 2):.2f} MB")
+        # logger.info(f"Peak allocated memory: {memory_stats['allocated_bytes.all.peak'] / (1024 ** 2):.2f} MB")
+        # logger.info(f"Current reserved memory: {memory_stats['reserved_bytes.all.current'] / (1024 ** 2):.2f} MB")
+        # logger.info(f"Peak reserved memory: {memory_stats['reserved_bytes.all.peak'] / (1024 ** 2):.2f} MB")
         
-        inp, outputs, gt_hms, gt_j3d, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index = compute_fn(model, batch)
+        torch.cuda.empty_cache()
+        inp, outputs, gt_hms, gt_j3d, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index = compute_fn(model, batch, temporal_steps)
         meta = {'j3d': gt_j3d, 'j2d': gt_j2d, 'vis_j2d': vis_j2d, 'vis_j3d': vis_j3d}   
+
+        # print(prof.key_averages().table(sort_by="cuda_memory_usage", row_limit=10))
         
         pred_hms = outputs['hms']
         pred_seg = outputs['seg']
@@ -210,7 +263,8 @@ def train(config, train_loader, model, criterions, optimizer, epoch, output_dir,
         gt_j3d = gt_j3d  * 1000 # scale to mm
         pred_j3d = outputs['j3d'] * 1000 # scale to mm        
 
-        with autocast():
+        # with autocast():
+        with torch.amp.autocast('cuda', enabled=True):
             loss_hms = criterions['hms'](pred_hms, gt_hms, vis_j2d * 10)  # scale to 10
             loss_seg = criterions['seg'](pred_seg, gt_seg, valid_seg)
             loss_j3d = criterions['j3d'](pred_j3d, gt_j3d, vis_j3d * 1e-2)  # scale to 1e-2
@@ -229,6 +283,7 @@ def train(config, train_loader, model, criterions, optimizer, epoch, output_dir,
         scaler.step(optimizer)
         scaler.update()
         optimizer.zero_grad()
+        
 
         # B = int((1+inp[-1,-1]).item())
         hms_losses.update(loss_hms.item(), inp.size(0))
@@ -246,7 +301,26 @@ def train(config, train_loader, model, criterions, optimizer, epoch, output_dir,
 
         representation = outputs['representation']
         representation_image = create_image(representation)
-        pred_eros_image = create_image(pred_eros)
+        pred_eros_image = create_image(pred_eros.detach())
+
+
+        outputs['prev_states'].detach()
+        # states_store = outputs['states_store']
+
+        # recursive_detach(states_store)
+
+        # recursive_detach(states_store)
+
+        
+
+        # memory_stats = torch.cuda.memory_stats("cuda:0")
+        # logger.info("Batch shape: {}".format(inp.shape))
+        # logger.info(f"Peak reserved memory: {memory_stats['reserved_bytes.all.peak'] / (1024 ** 2):.2f} MB")
+        # import pdb; pdb.set_trace()
+        # logger.info(f"Current allocated memory: {memory_stats['allocated_bytes.all.current'] / (1024 ** 2):.2f} MB")
+        # logger.info(f"Peak allocated memory: {memory_stats['allocated_bytes.all.peak'] / (1024 ** 2):.2f} MB")
+        # logger.info(f"Current reserved memory: {memory_stats['reserved_bytes.all.current'] / (1024 ** 2):.2f} MB")
+        
 
         if i % config.PRINT_FREQ == 0:
             msg = 'Epoch: [{0}][{1}/{2}]\t' \
@@ -271,9 +345,9 @@ def train(config, train_loader, model, criterions, optimizer, epoch, output_dir,
 
             memory_stats = torch.cuda.memory_stats("cuda:0")
             logger.info("Batch shape: {}".format(inp.shape))
-            logger.info(f"Current allocated memory: {memory_stats['allocated_bytes.all.current'] / (1024 ** 2):.2f} MB")
-            logger.info(f"Peak allocated memory: {memory_stats['allocated_bytes.all.peak'] / (1024 ** 2):.2f} MB")
-            logger.info(f"Current reserved memory: {memory_stats['reserved_bytes.all.current'] / (1024 ** 2):.2f} MB")
+            # logger.info(f"Current allocated memory: {memory_stats['allocated_bytes.all.current'] / (1024 ** 2):.2f} MB")
+            # logger.info(f"Peak allocated memory: {memory_stats['allocated_bytes.all.peak'] / (1024 ** 2):.2f} MB")
+            # logger.info(f"Current reserved memory: {memory_stats['reserved_bytes.all.current'] / (1024 ** 2):.2f} MB")
             logger.info(f"Peak reserved memory: {memory_stats['reserved_bytes.all.peak'] / (1024 ** 2):.2f} MB")
 
             writer = writer_dict['writer']
@@ -286,14 +360,14 @@ def train(config, train_loader, model, criterions, optimizer, epoch, output_dir,
             writer_dict['train_global_steps'] = global_steps + 1
 
             if i % (config.PRINT_FREQ * 4) == 0:
-                try:
-                    save_debug_images(config, representation_image, meta, gt_hms, pred_j2d, pred_hms, 'train', writer, global_steps)
-                    save_debug_3d_joints(config, inp, meta, gt_j3d, pred_j3d, 'train', writer, global_steps)
-                    save_debug_segmenation(config, inp, meta, gt_seg, pred_seg_detached, 'train', writer, global_steps)
-                    save_debug_eros(config, representation_image, meta, pred_eros_image, 'train', writer, global_steps)
-                except Exception as e:
-                    print("Error in saving debug data")
-                    print(e)
+                # try:
+                save_debug_images(config, representation_image, meta, gt_hms, pred_j2d, pred_hms, 'train', writer, global_steps)
+                save_debug_3d_joints(config, inp, meta, gt_j3d, pred_j3d, 'train', writer, global_steps)
+                save_debug_segmenation(config, inp, meta, gt_seg, pred_seg_detached, 'train', writer, global_steps)
+                save_debug_eros(config, representation_image, meta, pred_eros_image, 'train', writer, global_steps)
+                # except Exception as e:
+                    # print("Error in saving debug data")
+                    # print(e)
 
         torch.cuda.empty_cache()
 
@@ -317,6 +391,8 @@ def validate(config, val_loader, val_dataset, model, criterions, output_dir, tb_
 
     key = torch.ones(config.BATCH_SIZE, 1, hm_H, hm_W).cuda()
 
+    temporal_steps = config.DATASET.TEMPORAL_STEPS
+
     all_frame_indices = []
     all_gt_j3ds = []
     all_preds_j3d = []
@@ -325,7 +401,7 @@ def validate(config, val_loader, val_dataset, model, criterions, output_dir, tb_
         end = time.time()
         for i, batch in enumerate(val_loader):
             # if i > config.TEST_ITERATIONS_PER_EPOCH: break
-            inp, outputs, gt_hms, gt_j3d, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index = compute_fn(model, batch, buffer, key, batch_first=True)                    
+            inp, outputs, gt_hms, gt_j3d, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index = compute_fn(model, batch, temporal_steps, buffer, key, batch_first=True)                    
             
             meta = {'j3d': gt_j3d, 'j2d': gt_j2d, 'vis_j2d': vis_j2d, 'vis_j3d': vis_j3d}   
 
@@ -448,20 +524,21 @@ def test(cfg, valid_loader, valid_dataset, model, tb_log_dir, writer_dict, seq_t
         data, meta = valid_dataset[i]
 
         inp = data['x']
-        max_len, feature_dim = inp.shape
-        indices = torch.arange(0, 1, dtype=torch.float32).view(-1, 1, 1).expand(-1, max_len, 1)
-        inp = torch.cat([inp, indices.squeeze(0)], dim=1).cuda()
+        # max_len, feature_dim = inp.shape
+        # indices = torch.arange(0, 1, dtype=torch.float32).view(-1, 1, 1).expand(-1, max_len, 1)
+        # inp = torch.cat([inp, indices.squeeze(0)], dim=1).cuda()
 
         gt_j3d_ = data['j3d']
         # gt_hms = data['hms']
 
-        inps.append(inp)
+        inps.append(inp[None, None, ...])
         gt_j3d.append(gt_j3d_[None, ...])
         gt_hms.append(data['hms'][None, ...])
 
         inps = torch.cat(inps, dim=0).cuda()
         with torch.no_grad():
-            outputs = model(inp)
+            # import pdb; pdb.set_trace()
+            outputs = model(inps)
 
         pred_j3ds = outputs['j3d'].cpu().numpy()
         preds_hms = outputs['hms'].cpu().numpy()
@@ -474,8 +551,7 @@ def test(cfg, valid_loader, valid_dataset, model, tb_log_dir, writer_dict, seq_t
         representation = outputs['representation']
         representation_image = create_image(representation)
 
-
-        T, N, C = inps.unsqueeze(0).shape
+        T, B, N, C = inps.shape
 
         for i in range(T):
             gt_j3d = gt_j3ds[i]

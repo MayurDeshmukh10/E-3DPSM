@@ -264,7 +264,7 @@ def generate_skeleton_image(gt_j3d, pred_j3d):
 
 
 def save_debug_3d_joints(config, inp, meta, gt_j3d, pred_j3d, prefix, writer, global_step):    
-    idx = np.random.randint(0, int((1+inp[-1,-1]).item()))
+    idx = np.random.randint(0, int(config.BATCH_SIZE))
     
     if isinstance(gt_j3d, torch.Tensor):
         gt_j3d = gt_j3d.detach().cpu().numpy()

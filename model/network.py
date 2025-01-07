@@ -193,7 +193,9 @@ class QuantizationLayer(nn.Module):
 
         # Loop through bins to compute values and accumulate in voxel grid
         for i_bin in range(C):
+            # import pdb; pdb.set_trace()
             values = t * self.value_layer.forward(t - i_bin / (C - 1))
+            # values = t * self.value_layer.trilinear_kernel((t - i_bin / (C - 1)), 9)
 
             # Calculate final index for this bin
             idx = idx_before_bins + W * H * i_bin
@@ -280,7 +282,7 @@ class EROS(nn.Module):
             event_batch = event_batch[valid_mask]
             event_batch = event_batch.cpu().numpy()
             event_batch = np.hstack([event_batch, i * np.ones((len(event_batch), 1), dtype=np.float32)])
-            event_batch = torch.from_numpy(event_batch).to(events.device)
+            event_batch = torch.from_numpy(event_batch).cuda()
             # print(f"Event batch shape: {event_batch.shape}")
             quantized_events_batch = self.quantization_layer(event_batch)
             quantized_events.append(quantized_events_batch)
@@ -305,7 +307,7 @@ class EROS(nn.Module):
         # return out, confidence, buffer, quantized_events
 
 
-        return out, confidence, buffer, quantized_events
+        return out, confidence, buffer, quantized_events.clone().detach()
 
 
 class EgoHPE(nn.Module):
@@ -328,11 +330,14 @@ class EgoHPE(nn.Module):
 
         self.EROS = EROS(inp_chn=self.inp_chn, kernel_size=kernal_size, height=self.height, width=self.width, initial_decay_base=decay_base, batch_size=self.batch_size)
         
-    def forward(self, x, prev_buffer=None, prev_key=None, prev_states=None, batch_first=False):
-        if batch_first:
-            x = x.permute(1, 0, 2, 3, 4)
+    def forward(self, x, prev_buffer=None, prev_key=None, batch_first=False):
+        # if batch_first:
+        #     import pdb; pdb.set_trace()
+        #     x = x.permute(1, 0, 2, 3, 4)
 
         buffer = prev_buffer
+
+        prev_states = None
 
         # import pdb; pdb.set_trace() 
 
@@ -355,6 +360,7 @@ class EgoHPE(nn.Module):
 
         confidences = []
         buffers = []
+        # states_store = []
 
         for i in range(T):
             if self.enable_eros:
@@ -370,7 +376,12 @@ class EgoHPE(nn.Module):
             
             outs = self.event_3d_posenet(out, prev_states)
 
+            # memory_stats = torch.cuda.memory_stats("cuda:0")
+            # print(f"Peak reserved memory: {memory_stats['reserved_bytes.all.peak'] / (1024 ** 2):.2f} MB")
+            
             prev_states = outs['prev_states']
+
+            # states_store.append(outs['states_store'])
 
             buffer = out
 
@@ -412,6 +423,7 @@ class EgoHPE(nn.Module):
         outputs['buffer'] = buffers
         outputs['representation'] = representation
         outputs['prev_states'] = prev_states
+        # outputs['states_store'] = states_store
  
         return outputs
 
