@@ -54,6 +54,9 @@ def main():
 
     model = EgoHPE(cfg)
 
+    training_type = cfg.TRAINING_TYPE
+    
+
     writer_dict = {
         'writer': SummaryWriter(log_dir=tb_log_dir),
         'train_global_steps': 0,
@@ -75,9 +78,9 @@ def main():
     criterions['seg'] = SegmentationLoss().cuda()
 
     if cfg.DATASET.BG_AUG:
-        train_dataset = AugmentedEgoEvent(cfg, TrainDataset(cfg, split='train'))
+        pretrain_dataset = AugmentedEgoEvent(cfg, TrainDataset(cfg, split='train'))
     else:
-        train_dataset = TrainDataset(cfg, split='train')
+        pretrain_dataset = TrainDataset(cfg, split='train')
         
     if cfg.DATASET.BG_AUG:
         finetune_dataset = AugmentedEgoEvent(cfg, EgoEvent(cfg, split='train', finetune=True))
@@ -87,8 +90,14 @@ def main():
     cfg.DATASET.TYPE = 'Real'    
     valid_dataset = EgoEvent(cfg, split='test')
 
-    train_dataset = TemoralWrapper(train_dataset, cfg.DATASET.TEMPORAL_STEPS, augment=True)
-    finetune_dataset = TemoralWrapper(finetune_dataset, cfg.DATASET.TEMPORAL_STEPS, augment=False)
+    if training_type == 'pretrain':
+        pretraining = True
+        train_dataset = TemoralWrapper(pretrain_dataset, cfg.DATASET.TEMPORAL_STEPS, augment=True)
+    elif training_type == 'finetune':
+        pretraining = False
+        train_dataset = TemoralWrapper(finetune_dataset, cfg.DATASET.TEMPORAL_STEPS, augment=False)
+    else:
+        assert False, f"Invalid training type: {training_type}"
 
     batch_size = cfg.BATCH_SIZE * cfg.N_GPUS
     n_workers = 0 if cfg.DEBUG.NO_MP else min(os.cpu_count(), batch_size)
@@ -98,6 +107,8 @@ def main():
     print(f"N_GPUS: {cfg.N_GPUS}")
     print(f'IMAGE_SIZE: {cfg.MODEL.IMAGE_SIZE}')
     print(f'HEATMAP_SIZE: {cfg.MODEL.HEATMAP_SIZE}')
+
+    logger.info(f"Training type: {training_type}")
     
     train_loader = torch.utils.data.DataLoader(
         train_dataset,
@@ -108,14 +119,14 @@ def main():
         pin_memory=True
     )
     
-    finetune_loader = torch.utils.data.DataLoader(
-        finetune_dataset,
-        batch_size=batch_size,
-        collate_fn=collate_variable_size,
-        shuffle=True,
-        num_workers=n_workers ,
-        pin_memory=True
-    )
+    # finetune_loader = torch.utils.data.DataLoader(
+    #     finetune_dataset,
+    #     batch_size=batch_size,
+    #     collate_fn=collate_variable_size,
+    #     shuffle=True,
+    #     num_workers=n_workers ,
+    #     pin_memory=True
+    # )
 
     valid_loader = torch.utils.data.DataLoader(
         valid_dataset,
@@ -156,7 +167,7 @@ def main():
     for epoch in trange(begin_epoch, cfg.TRAIN.END_EPOCH, desc='Epoch'):
         try:
             # # train for one epoch
-            train(cfg, train_loader, model, criterions, optimizer, epoch, final_output_dir, tb_log_dir, writer_dict, pretraining=True)
+            train(cfg, train_loader, model, criterions, optimizer, epoch, final_output_dir, tb_log_dir, writer_dict, pretraining=pretraining)
             # train(cfg, finetune_loader, model, criterions, optimizer, epoch, final_output_dir, tb_log_dir, writer_dict, pretraining=False)
 
             # # evaluate on validation set
