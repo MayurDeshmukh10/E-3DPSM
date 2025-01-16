@@ -32,6 +32,7 @@ config.MODEL.HEATMAP_SIZE = [config.MODEL.IMAGE_SIZE[0] // config.MODEL.HEAT_MAP
 config.MODEL.TARGET_TYPE = 'gaussian'
 config.MODEL.SIGMA = 2
 
+config.TRAINING_TYPE = os.getenv('TRAINING_TYPE', 'pretrain') # pretrain, finetune
 
 config.EROS = True
 
