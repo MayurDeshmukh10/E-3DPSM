@@ -187,28 +187,31 @@ def save_batch_heatmaps(batch_image, batch_heatmaps, writer, tag, global_step,
     # cv2.imwrite(file_name, grid_image)
     writer.add_image(tag, grid_image.transpose(2, 0, 1), global_step)
 
-def save_debug_images(config, input, meta, target, joints_pred, output, prefix, writer, global_step):
+def save_debug_images(config, input, meta, target, joints_pred, output, prefix, writer, global_step, n_images=4):
     if config.DEBUG.SAVE_BATCH_IMAGES_GT:
         save_batch_image_with_joints(
             input, meta['j2d'], meta['vis_j2d'],
             writer, f'{prefix}_gt', 
-            global_step
+            global_step, n_images=n_images
         )
     if config.DEBUG.SAVE_BATCH_IMAGES_PRED:
         save_batch_image_with_joints(
             input, joints_pred, meta['vis_j2d'],
             writer, f'{prefix}_pred',
-            global_step
+            global_step,
+            n_images=n_images
         )
     if config.DEBUG.SAVE_HEATMAPS_GT:
         save_batch_heatmaps(
             input, target, writer, f'{prefix}_hm_gt',
-            global_step
+            global_step,
+            n_images=n_images
         )
     if config.DEBUG.SAVE_HEATMAPS_PRED:
         save_batch_heatmaps(
             input, output, writer, f'{prefix}_hm_pred',
-            global_step
+            global_step,
+            n_images=n_images
         )
 
 
@@ -282,12 +285,20 @@ def save_debug_3d_joints(config, inp, meta, gt_j3d, pred_j3d, prefix, writer, gl
 
 
 def save_debug_segmenation(config, inp, meta, gt_seg, pred_seg, prefix, writer, global_step):
-    save_batch_images(gt_seg, writer, f'{prefix}_seg_gt', global_step)
-    save_batch_images(pred_seg, writer, f'{prefix}_seg_pred', global_step)
+    if int(config.BATCH_SIZE) < 4:
+        n_images = int(config.BATCH_SIZE)
+    else:
+        n_images = 4
+    save_batch_images(gt_seg, writer, f'{prefix}_seg_gt', global_step, n_images=n_images)
+    save_batch_images(pred_seg, writer, f'{prefix}_seg_pred', global_step, n_images=n_images)
 
 
 def save_debug_eros(config, inp, meta, eros, prefix, writer, global_step):
-    save_batch_images(eros, writer, f'{prefix}_eros', global_step, shuffle=True)
+    if int(config.BATCH_SIZE) < 4:
+        n_images = int(config.BATCH_SIZE)
+    else:
+        n_images = 4
+    save_batch_images(eros, writer, f'{prefix}_eros', global_step, shuffle=True, n_images=n_images)
  
  
 def plot_heatmaps(image, heatmaps):
