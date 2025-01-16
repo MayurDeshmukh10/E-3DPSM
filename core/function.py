@@ -1,3 +1,4 @@
+import os
 import time
 import logging
 from typing import Any
@@ -17,6 +18,8 @@ import torchvision
 from torch.cuda.amp import autocast, GradScaler
 
 from torch.profiler import profile, ProfilerActivity
+
+from utils.utils import save_checkpoint
 
 logger = logging.getLogger(__name__)
 
@@ -114,15 +117,15 @@ def compute_fn(model, batch, temporal_steps, prev_buffer=None, prev_key=None, pr
             ]
         temp.append(torch.stack(aa))
 
-    inps = torch.stack(temp)
 
+    inps = torch.stack(temp)
     gt_hms = torch.stack(gt_hms).cuda()
     gt_j3d = torch.stack(gt_j3d).cuda()
     gt_seg = torch.stack(gt_seg).cuda()
 
     gt_j2d = torch.stack(gt_j2d).cuda()
 
-    # import pdb; pdb.set_trace()
+    
     vis_j2d = torch.stack(vis_j2d).cuda()
     vis_j3d = torch.stack(vis_j3d).cuda()
     valid_j3d = torch.stack(valid_j3d).cuda()
@@ -132,10 +135,26 @@ def compute_fn(model, batch, temporal_steps, prev_buffer=None, prev_key=None, pr
     # frame_index = torch.cat(frame_index, dim=0).cuda()
     
     # print("Inps shape: ", inps.shape)
-    outputs = model(inps, prev_buffer, prev_key, batch_first)
+    # logger.info("Batch shape: {}".format(inp.shape))
+    # memory_stats = torch.cuda.memory_stats("cuda:0")
+    # logger.info("Before model")
+    # logger.info(f"Current allocated memory: {memory_stats['allocated_bytes.all.current'] / (1024 ** 2):.2f} MB")
+    # logger.info(f"Peak allocated memory: {memory_stats['allocated_bytes.all.peak'] / (1024 ** 2):.2f} MB")
+    # logger.info(f"Current reserved memory: {memory_stats['reserved_bytes.all.current'] / (1024 ** 2):.2f} MB")
+    # logger.info(f"Peak reserved memory: {memory_stats['reserved_bytes.all.peak'] / (1024 ** 2):.2f} MB")
+    # print("Inps shape: ", inps.shape)
+    _, _, N, C = inps.shape
+    # if len(str(N)) > 6: # skip if too many samples
+    if int(N) > 700000:
+        return inps, _, gt_hms, gt_j3d, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index, False
+
+    try:
+        outputs = model(inps, prev_buffer, prev_key, batch_first)
+    except torch.OutOfMemoryError:
+        return inps, _, gt_hms, gt_j3d, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index, False
 
     T, B, N, C = inps.shape
-    return inps.view(T * B, N, C), outputs, gt_hms, gt_j3d, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index
+    return inps.view(T * B, N, C), outputs, gt_hms, gt_j3d, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index, True
 
 def percentile(t, q):
     B, C, H, W = t.shape
@@ -226,10 +245,13 @@ def train(config, train_loader, model, criterions, optimizer, epoch, output_dir,
 
     temporal_steps = config.DATASET.TEMPORAL_STEPS
 
+    batch_skipped = 0
+    valid_counter = 0
+
     for i, batch in enumerate(train_loader):
 
     
-        if i > config.TRAIN_ITERATIONS_PER_EPOCH: break
+        if valid_counter > config.TRAIN_ITERATIONS_PER_EPOCH: break
 
         data_time.update(time.time() - end)
 
@@ -243,15 +265,26 @@ def train(config, train_loader, model, criterions, optimizer, epoch, output_dir,
             
 
         # logger.info("Batch shape: {}".format(inp.shape))
-        memory_stats = torch.cuda.memory_stats("cuda:0")
+        # memory_stats = torch.cuda.memory_stats("cuda:0")
         # logger.info("Before model")
         # logger.info(f"Current allocated memory: {memory_stats['allocated_bytes.all.current'] / (1024 ** 2):.2f} MB")
         # logger.info(f"Peak allocated memory: {memory_stats['allocated_bytes.all.peak'] / (1024 ** 2):.2f} MB")
         # logger.info(f"Current reserved memory: {memory_stats['reserved_bytes.all.current'] / (1024 ** 2):.2f} MB")
         # logger.info(f"Peak reserved memory: {memory_stats['reserved_bytes.all.peak'] / (1024 ** 2):.2f} MB")
-        
-        torch.cuda.empty_cache()
-        inp, outputs, gt_hms, gt_j3d, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index = compute_fn(model, batch, temporal_steps)
+        # try:
+        inp, outputs, gt_hms, gt_j3d, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index, status = compute_fn(model, batch, temporal_steps)
+        if status is False: # if out of memory
+            batch_skipped += 1
+            print("Input shape: ", inp.shape)
+            print("FAILED COUNTER: ", batch_skipped)
+            continue
+        # except torch.OutOfMemoryError:
+        #     batch_skipped += 1
+        #     print("FAILED COUNTER: ", batch_skipped)
+        #     continue
+
+        valid_counter += 1
+
         meta = {'j3d': gt_j3d, 'j2d': gt_j2d, 'vis_j2d': vis_j2d, 'vis_j3d': vis_j3d}   
 
         # print(prof.key_averages().table(sort_by="cuda_memory_usage", row_limit=10))
@@ -311,16 +344,30 @@ def train(config, train_loader, model, criterions, optimizer, epoch, output_dir,
 
         # recursive_detach(states_store)
 
-        
+        torch.cuda.empty_cache()
 
+        # print("After model")
         # memory_stats = torch.cuda.memory_stats("cuda:0")
         # logger.info("Batch shape: {}".format(inp.shape))
         # logger.info(f"Peak reserved memory: {memory_stats['reserved_bytes.all.peak'] / (1024 ** 2):.2f} MB")
-        # import pdb; pdb.set_trace()
+        # # import pdb; pdb.set_trace()
         # logger.info(f"Current allocated memory: {memory_stats['allocated_bytes.all.current'] / (1024 ** 2):.2f} MB")
         # logger.info(f"Peak allocated memory: {memory_stats['allocated_bytes.all.peak'] / (1024 ** 2):.2f} MB")
         # logger.info(f"Current reserved memory: {memory_stats['reserved_bytes.all.current'] / (1024 ** 2):.2f} MB")
         
+        # import pdb; pdb.set_trace()
+
+        if i % 5000 == 0:
+            filename = f'{i}_it_checkpoint.pth'
+            save_checkpoint(epoch + 1, {
+            'epoch': epoch + 1,
+            'model': config.MODEL.NAME,
+            'state_dict': model.state_dict(),
+            'best_state_dict': model.module.state_dict(),
+            'perf': 1e6,
+            'optimizer': optimizer.state_dict(),
+        }, False, output_dir, tb_log_dir, filename=filename)
+
 
         if i % config.PRINT_FREQ == 0:
             msg = 'Epoch: [{0}][{1}/{2}]\t' \
@@ -359,9 +406,14 @@ def train(config, train_loader, model, criterions, optimizer, epoch, output_dir,
             # writer.add_scalar('train_seg_loss', seg_losses.val, global_steps)
             writer_dict['train_global_steps'] = global_steps + 1
 
+            if int(config.BATCH_SIZE) < 4:
+                n_images = int(config.BATCH_SIZE)
+            else:
+                n_images = 4
+
             if i % (config.PRINT_FREQ * 4) == 0:
                 # try:
-                save_debug_images(config, representation_image, meta, gt_hms, pred_j2d, pred_hms, 'train', writer, global_steps)
+                save_debug_images(config, representation_image, meta, gt_hms, pred_j2d, pred_hms, 'train', writer, global_steps, n_images=n_images)
                 save_debug_3d_joints(config, inp, meta, gt_j3d, pred_j3d, 'train', writer, global_steps)
                 save_debug_segmenation(config, inp, meta, gt_seg, pred_seg_detached, 'train', writer, global_steps)
                 save_debug_eros(config, representation_image, meta, pred_eros_image, 'train', writer, global_steps)
@@ -369,7 +421,7 @@ def train(config, train_loader, model, criterions, optimizer, epoch, output_dir,
                     # print("Error in saving debug data")
                     # print(e)
 
-        torch.cuda.empty_cache()
+        
 
 
 def validate(config, val_loader, val_dataset, model, criterions, output_dir, tb_log_dir, writer_dict):
@@ -397,13 +449,28 @@ def validate(config, val_loader, val_dataset, model, criterions, output_dir, tb_
     all_gt_j3ds = []
     all_preds_j3d = []
     all_vis_j3d = []
+    batch_skipped = 0
+    valid_counter = 0
     with torch.no_grad():
         end = time.time()
         for i, batch in enumerate(val_loader):
             # if i > config.TEST_ITERATIONS_PER_EPOCH: break
-            inp, outputs, gt_hms, gt_j3d, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index = compute_fn(model, batch, temporal_steps, buffer, key, batch_first=True)                    
+            # inp, outputs, gt_hms, gt_j3d, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index = compute_fn(model, batch, temporal_steps, buffer, key, batch_first=True)
+            try:
+                inp, outputs, gt_hms, gt_j3d, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index, status = compute_fn(model, batch, temporal_steps, buffer, key, batch_first=True)
+            except RuntimeError as e:
+                logger.info("Error in batch : {}".format(e))
+                continue
             
-            meta = {'j3d': gt_j3d, 'j2d': gt_j2d, 'vis_j2d': vis_j2d, 'vis_j3d': vis_j3d}   
+            if status is False: # if out of memory
+                batch_skipped += 1
+                print("Input shape: ", inp.shape)
+                print("FAILED COUNTER: ", batch_skipped)
+                continue
+            
+            valid_counter += 1
+            
+            meta = {'j3d': gt_j3d, 'j2d': gt_j2d, 'vis_j2d': vis_j2d, 'vis_j3d': vis_j3d}
 
             pred_hms = outputs['hms']            
             pred_j3d = outputs['j3d'] * 1000 # scale to mm        
