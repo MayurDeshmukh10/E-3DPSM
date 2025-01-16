@@ -174,8 +174,8 @@ class EgoEvent(Dataset):
             print(dataset.data_path)
         print('Total number of events: ', self.total_length)
 
-        self.indices = generate_indices(self.dataset_root, self.datasets)
-        # self.indices = generate_indices(Path('/CT/EventEgo3Dv2/work/data'), self.datasets)
+        # self.indices = generate_indices(self.dataset_root, self.datasets)
+        self.indices = generate_indices(Path('/scratch/inf0/user/mdeshmuk/ee3d_indices'), self.datasets)
 
     def __len__(self):
         return self.total_length
