@@ -91,109 +91,53 @@ class QuantizationLayer(nn.Module):
         self.dim = dim
         self.batch_size = batch_size
 
-    def forward(self, events):
+    def forward(self, events_list):
 
-        # B = self.batch_size
-        B = 1
+        B = len(events_list)
 
         num_voxels = int(2 * np.prod(self.dim) * B)
-        vox = events[0].new_full([num_voxels,], fill_value=0)
+        vox = events_list[0][0].new_full([num_voxels,], fill_value=0)
 
-        # import pdb; pdb.set_trace()
         C, H, W = self.dim
 
-        x, y, t, p, b = events.t()
+        x_values = [events[:, 0] for events in events_list]
+        y_values = [events[:, 1] for events in events_list]
+        t_values = [events[:, 2] for events in events_list]
+        p_values = [events[:, 3] for events in events_list]
+        b_values = [i * torch.ones((len(events))) for i, events in enumerate(events_list)]
+        
+
+        x = torch.cat(x_values, dim=0)
+        y = torch.cat(y_values, dim=0)
+        t = torch.cat(t_values, dim=0)
+        p = torch.cat(p_values, dim=0)
+        b = torch.cat(b_values, dim=0).cuda()
+
+
+        # import pdb; pdb.set_trace()
+        # x, y, t, p, b = events.t()
 
         
         # current_batch = torch.unique(events[:, 4], sorted=True).tolist()
         # import pdb; pdb.set_trace()
-        qq = b.unique()
+        # qq = b.unique()
         # for bi in range(B):
-        t[events[:,-1] == qq] /= t[events[:,-1] == qq].max()
+        # t[events[:,-1] == qq] /= t[events[:,-1] == qq].max()
 
         p = (p+1)/2  # maps polarity to 0, 1
 
-        # idx_before_bins = x \
-        #                   + W * y \
-        #                   + 0 \
-        #                   + W * H * C * p \
-        #                   + W * H * C * 2 * b
-
-        # for i_bin in range(C):
-        #     values = t * self.value_layer.forward(t-i_bin/(C-1))
-
-        #     # draw in voxel grid
-        #     idx = idx_before_bins + W * H * i_bin
-        #     vox.put_(idx.long(), values, accumulate=True)
-
-        # vox = vox.view(-1, 2, C, H, W)
-        # vox = torch.cat([vox[:, 0, ...], vox[:, 1, ...]], 1)
-
-        # return vox
-    
-        # x, y, t, p, b = events.permute(1, 0, 2).reshape(N * B, 5).t()
-        # b = b.long()
-        # b = b.long().to(x.device)
-        # t = t.to(x.device)
-
-        # normalizing timestamps
-        # for bi in range(B):
-        #     try:
-        #         t[events[:,-1] == bi] /= t[events[:,-1] == bi].max()
-        #     except: # if there are no events for this batch
-        #         print("Error in normalizing timestamps")
-        #         pass
-
-        # try:
-        #     for bi in range(B):
-        #         batch_indices = (b == bi)
-        #         if batch_indices.any():  # Only normalize if there are events for this batch
-        #             t[batch_indices] /= t[batch_indices].max()
-        # except:
-        #     import pdb; pdb.set_trace()
-        # try:
-        #     for bi in range(B):
-        #         t[b == bi] /= t[b == bi].max()
-        # except:
-        #     import pdb; pdb.set_trace()
-
-        # p = (p+1)/2  # maps polarity to 0, 1
-
-
-        # idx_before_bins = x \
-        #                   + W * y \
-        #                   + 0 \
-        #                   + W * H * C * p \
-        #                   + W * H * C * 2 * b
-
-        # idx_before_bins = (
-        #     x + W * y + 0 + W * H * C * p + W * H * C * 2 * b
-        # )
-
-        # for i_bin in range(C):
-        #     values = t * self.value_layer.forward(t - i_bin / (C - 1))
-
-        #     # Draw in voxel grid
-        #     idx = idx_before_bins + W * H * i_bin
-            
-        #     idx_cpu = idx.long().cpu()
-        #     assert (idx_cpu >= 0).all() and (idx_cpu < num_voxels).all(), \
-        #         f"Invalid indices in `idx`: min={idx_cpu.min()}, max={idx_cpu.max()}"
-    
-        #     vox.put_(idx.long(), values, accumulate=True)
 
         x_idx = x
         y_idx = W * y
         channel_offset = W * H * C * p
-        # batch_offset = W * H * C * 2 * b
-        batch_offset = 0
+        batch_offset = W * H * C * 2 * b
+        # batch_offset = 0
 
         # Summing to get final index
         idx_before_bins = x_idx + y_idx + channel_offset + batch_offset
 
         # Loop through bins to compute values and accumulate in voxel grid
         for i_bin in range(C):
-            # import pdb; pdb.set_trace()
             values = t * self.value_layer.forward(t - i_bin / (C - 1))
             # values = t * self.value_layer.trilinear_kernel((t - i_bin / (C - 1)), 9)
 
@@ -202,29 +146,17 @@ class QuantizationLayer(nn.Module):
 
             # Ensure idx is within bounds
             if (idx < 0).any() or (idx >= num_voxels).any():
-                # import pdb; pdb.set_trace()
                 print(f"Out-of-bounds indices detected: min={idx.min()}, max={idx.max()}, expected range=[0, {num_voxels-1}]")
                 idx = idx.clamp(0, num_voxels - 1)  # Clamp values within bounds
 
             # Accumulate values in the voxel grid
+            #import pdb; pdb.set_trace()
             vox.put_(idx.long(), values, accumulate=True)
 
         vox = vox.view(B, 2, C, H, W)
         vox = torch.cat([vox[:, 0, ...], vox[:, 1, ...]], 1)
 
         return vox
-
-        # for i_bin in range(C):
-        #     values = t * self.value_layer.forward(t-i_bin/(C-1))
-
-        #     # draw in voxel grid
-        #     idx = idx_before_bins + W * H * i_bin
-        #     vox.put_(idx.long(), values, accumulate=True)
-
-        # vox = vox.view(-1, 2, C, H, W)
-        # vox = torch.cat([vox[:, 0, ...], vox[:, 1, ...]], 1)
-
-        # return vox
 
 class ConfidenceNetwork(nn.Module):
     def __init__(self):
@@ -275,21 +207,21 @@ class EROS(nn.Module):
         self.height = height
         
     def forward(self, buffer, events, key):
-        # import pdb; pdb.set_trace()
-        quantized_events = []
+        events_list = []
         for i, event_batch in enumerate(events):
-            valid_mask = ~(event_batch == -10).all(dim=1)
+            valid_mask = ~(event_batch == -10).all(dim=1) # remove invalid events
             event_batch = event_batch[valid_mask]
-            event_batch = event_batch.cpu().numpy()
-            event_batch = np.hstack([event_batch, i * np.ones((len(event_batch), 1), dtype=np.float32)])
-            event_batch = torch.from_numpy(event_batch).cuda()
-            # print(f"Event batch shape: {event_batch.shape}")
-            quantized_events_batch = self.quantization_layer(event_batch)
-            quantized_events.append(quantized_events_batch)
+            event_batch[:, 2] /= event_batch[:, 2].max() # normalize timestamps
+            events_list.append(event_batch)
         
-        quantized_events = torch.stack(quantized_events, dim=0)
+        # import pdb; pdb.set_trace()
+        quantized_events = self.quantization_layer(events_list)
+            
+        
+        # quantized_events = torch.stack(quantized_events, dim=0)
 
-        quantized_events = quantized_events.squeeze(1)
+        # import pdb; pdb.set_trace()
+        # quantized_events = quantized_events.squeeze(1)
 
         # quantized_events = crop_and_resize_to_resolution(quantized_events, (self.height, self.width))
         _, _, height, width = quantized_events.shape
@@ -331,6 +263,9 @@ class EgoHPE(nn.Module):
         self.EROS = EROS(inp_chn=self.inp_chn, kernel_size=kernal_size, height=self.height, width=self.width, initial_decay_base=decay_base, batch_size=self.batch_size)
         
     def forward(self, x, prev_buffer=None, prev_key=None, batch_first=False):
+        # import pdb; pdb.set_trace()
+        # x = x.to('cpu')
+        # import pdb; pdb.set_trace()
         # if batch_first:
         #     import pdb; pdb.set_trace()
         #     x = x.permute(1, 0, 2, 3, 4)
@@ -339,18 +274,16 @@ class EgoHPE(nn.Module):
 
         prev_states = None
 
-        # import pdb; pdb.set_trace() 
-
         T, B, N, C = x.shape
         
         if buffer is None:
             # buffer = torch.zeros_like(x[0, :, :, :, :])
-            buffer = torch.zeros(self.batch_size, self.inp_chn, self.height, self.width).to(x.device)
+            buffer = torch.zeros(self.batch_size, self.inp_chn, self.height, self.width).cuda()
         
         key = prev_key
 
         if key is None:
-            key = torch.ones(self.batch_size, 1, self.hm_height, self.hm_width).to(x.device)
+            key = torch.ones(self.batch_size, 1, self.hm_height, self.hm_width).cuda()
 
                     
         eross = []
