@@ -156,8 +156,8 @@ def main():
     for epoch in trange(begin_epoch, cfg.TRAIN.END_EPOCH, desc='Epoch'):
         try:
             # # train for one epoch
-            # train(cfg, train_loader, model, criterions, optimizer, epoch, final_output_dir, tb_log_dir, writer_dict, pretraining=True)
-            train(cfg, finetune_loader, model, criterions, optimizer, epoch, final_output_dir, tb_log_dir, writer_dict, pretraining=False)
+            train(cfg, train_loader, model, criterions, optimizer, epoch, final_output_dir, tb_log_dir, writer_dict, pretraining=True)
+            # train(cfg, finetune_loader, model, criterions, optimizer, epoch, final_output_dir, tb_log_dir, writer_dict, pretraining=False)
 
             # # evaluate on validation set
             perf_indicator = validate(
