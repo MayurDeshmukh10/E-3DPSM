@@ -19,7 +19,7 @@ config.DEBUG.SAVE_HEATMAPS_GT = True
 config.DEBUG.SAVE_HEATMAPS_PRED = True
 config.DEBUG.SAVE_BATCH_J3D_GT = False
 
-config.BATCH_SIZE = int(os.getenv('BATCH_SIZE', 4))
+config.BATCH_SIZE = int(os.getenv('BATCH_SIZE', 20))
 config.N_GPUS = len(os.getenv('CUDA_VISIBLE_DEVICES', '0').split(','))
 config.PRINT_FREQ = 50
 
@@ -42,7 +42,7 @@ config.MODEL.CHECKPOINT_PATH = os.getenv('CHECKPOINT_PATH', '')
 # DATASET related params
 config.DATASET = edict()
 
-config.DATASET.TEMPORAL_STEPS = 20
+config.DATASET.TEMPORAL_STEPS = 5
 config.TRAIN_ITERATIONS_PER_EPOCH = 10000
 config.TEST_ITERATIONS_PER_EPOCH = 10000
 
