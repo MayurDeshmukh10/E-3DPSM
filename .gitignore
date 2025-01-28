@@ -5,3 +5,4 @@ scripts/logs/
 logs/
 output_images/
 visualizations/
+scripts/train.sh
