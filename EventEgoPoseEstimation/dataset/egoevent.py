@@ -131,19 +131,25 @@ class EgoEvent(Dataset):
             
         if cfg.DATASET.TYPE == 'Synthetic':
             dataset_root = Path(cfg.DATASET.SYN_ROOT)
+            # TODO: get this path from config
+            split_root_path = Path("/CT/EventEgo3Dv2/work/EventEgo3Dv2/dataset_splits/Synthetic")
+
         else:
             dataset_root = Path(cfg.DATASET.REAL_ROOT)
+            # TODO: Update this path
+            split_root_path = dataset_root
+
         
-        generate_path_split(dataset_root, cfg)
+        generate_path_split(split_root_path, cfg)
 
         assert split in ['train', 'val', 'test']
 
         if split == 'train':
-            split_path = dataset_root / 'train.txt'
+            split_path = split_root_path / 'train.txt'
         elif split == 'val':
-            split_path = dataset_root / 'val.txt'
+            split_path = split_root_path / 'val.txt'
         elif split == 'test':
-            split_path = dataset_root / 'test.txt'
+            split_path = split_root_path / 'test.txt'
             
         with open(split_path, 'r') as f:
             self.items = f.read().splitlines()

@@ -266,6 +266,9 @@ class RawEvent:
             xs, ys, ts, ps = data_batch.T
         else:
             raise ValueError('Invalid data_batch shape')
+
+        ts = (ts - ts.min()) / (ts.max() - ts.min()) # normalize timestamps
+        ts = ts.astype(np.float32)
         
         # xs, ys = self.resize_transform(xs, ys)
         # xs, ys = self.resize_transform(xs, ys)
@@ -273,7 +276,6 @@ class RawEvent:
 
         
 
-        ts = ts.astype(np.float32)
         # print(ts)
         # ts = (ts[-1] - ts) * 1e-3 # microseconds to milliseconds
         # ts = ts * 1e-3 # microseconds to milliseconds 

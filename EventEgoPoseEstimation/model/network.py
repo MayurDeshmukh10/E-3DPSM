@@ -5,6 +5,7 @@ from .blazepose import BlazePose
 from .base import Event3DPoseNet
 from os.path import join, dirname, isfile
 import numpy as np
+from EventEgoPoseEstimation.utils.vis import visualize_temporal_bins
 
 
 class ValueLayer(nn.Module):
@@ -113,17 +114,6 @@ class QuantizationLayer(nn.Module):
         p = torch.cat(p_values, dim=0)
         b = torch.cat(b_values, dim=0).cuda()
 
-
-        # import pdb; pdb.set_trace()
-        # x, y, t, p, b = events.t()
-
-        
-        # current_batch = torch.unique(events[:, 4], sorted=True).tolist()
-        # import pdb; pdb.set_trace()
-        # qq = b.unique()
-        # for bi in range(B):
-        # t[events[:,-1] == qq] /= t[events[:,-1] == qq].max()
-
         p = (p+1)/2  # maps polarity to 0, 1
 
 
@@ -131,7 +121,6 @@ class QuantizationLayer(nn.Module):
         y_idx = W * y
         channel_offset = W * H * C * p
         batch_offset = W * H * C * 2 * b
-        # batch_offset = 0
 
         # Summing to get final index
         idx_before_bins = x_idx + y_idx + channel_offset + batch_offset
@@ -150,10 +139,9 @@ class QuantizationLayer(nn.Module):
                 idx = idx.clamp(0, num_voxels - 1)  # Clamp values within bounds
 
             # Accumulate values in the voxel grid
-            #import pdb; pdb.set_trace()
             vox.put_(idx.long(), values, accumulate=True)
 
-        vox = vox.view(B, 2, C, H, W)
+        vox = vox.view(-1, 2, C, H, W)
         vox = torch.cat([vox[:, 0, ...], vox[:, 1, ...]], 1)
 
         return vox
@@ -211,18 +199,13 @@ class EROS(nn.Module):
         for i, event_batch in enumerate(events):
             valid_mask = ~(event_batch == -10).all(dim=1) # remove invalid events
             event_batch = event_batch[valid_mask]
-            event_batch[:, 2] /= event_batch[:, 2].max() # normalize timestamps
             events_list.append(event_batch)
         
-        # import pdb; pdb.set_trace()
         quantized_events = self.quantization_layer(events_list)
-            
+
+        # visualize_temporal_bins(quantized_events[0], '/CT/EventEgo3Dv2/work/EventEgo3Dv2/visualizations/data_flow')
         
-        # quantized_events = torch.stack(quantized_events, dim=0)
-
-        # import pdb; pdb.set_trace()
-        # quantized_events = quantized_events.squeeze(1)
-
+        
         # quantized_events = crop_and_resize_to_resolution(quantized_events, (self.height, self.width))
         _, _, height, width = quantized_events.shape
             
@@ -234,17 +217,12 @@ class EROS(nn.Module):
         # try:
         # TODO: Visualize this after applying the confidence
         # TODO: Does it make sense to apply confidence of (1, 192, 256) to all bins (18, 192, 256)
-        # import pdb; pdb.set_trace()
         out = buffer * confidence + quantized_events
-        # except Exception as e:
-        #     import pdb; pdb.set_trace()
 
         old_min, old_max, new_min, new_max = out.min(), out.max(), 0, 1
         out = (out - old_min) * (new_max - new_min) / (old_max - old_min) + new_min
 
         # return out, confidence, buffer, quantized_events
-
-
         return out, confidence, buffer, quantized_events.clone().detach()
 
 

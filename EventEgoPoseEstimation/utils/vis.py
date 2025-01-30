@@ -6,7 +6,9 @@ import torchvision
 import cv2
 import pyrender
 import trimesh
+import os
 
+from PIL import Image
 from configs.settings import config
 from EventEgoPoseEstimation.utils.heatmap import get_max_preds
 from EventEgoPoseEstimation.utils.skeleton import Skeleton
@@ -424,6 +426,76 @@ def create_ground_plane(ground_plane=None, length=25.0, color0=[0.8, 0.9, 0.9], 
         
         return ground_mesh
 
+def visualize_raw_events(events_tensor, output_path):
+    batch_idx = 0
+    batch_data = events_tensor[batch_idx]
+    valid_mask = ~(batch_data == -10).all(dim=1) # remove invalid events
+    batch_data = batch_data[valid_mask != -10]
+    
+    batch_data = batch_data.cpu().numpy()  # Move to CPU if on GPU
+    
+
+    # Extract x, y, polarity (adjust indices if necessary)
+    x = batch_data[:, 0].astype(int)  # x coordinates (column 0)
+    y = batch_data[:, 1].astype(int)  # y coordinates (column 1)
+    polarity = batch_data[:, 3]       # Polarity (column 3; adjust if needed)
+
+    # Set sensor resolution (REPLACE WITH YOUR SENSOR'S HEIGHT AND WIDTH)
+    height = 256  # Example: Replace with actual sensor height
+    width = 192   # Example: Replace with actual sensor width
+
+    # Create histograms for positive and negative events
+
+    # import pdb; pdb.set_trace()
+    pos_mask = (polarity == 1)
+    neg_mask = (polarity == -1)
+
+    # Compute 2D histograms
+    hist_pos, _, _ = np.histogram2d(
+        y[pos_mask], x[pos_mask],
+        bins=[height, width],
+        range=[[0, height], [0, width]]
+    )
+    hist_neg, _, _ = np.histogram2d(
+        y[neg_mask], x[neg_mask],
+        bins=[height, width],
+        range=[[0, height], [0, width]]
+    )
+
+    # Normalize each channel
+    if hist_pos.max() > 0:
+        hist_pos = hist_pos / hist_pos.max()
+    if hist_neg.max() > 0:
+        hist_neg = hist_neg / hist_neg.max()
+
+    # Create RGB image (positive: red, negative: blue)
+    image = np.zeros((height, width, 3))
+    image[..., 0] = hist_pos  # Red channel
+    image[..., 2] = hist_neg  # Blue channel
+
+    # Convert to uint8 (0-255)
+    image = (image * 255).astype(np.uint8)
+    Image.fromarray(image).save(f"{output_path}")
+
+
+def visualize_temporal_bins(event_tensor, output_path):
+    os.makedirs(output_path, exist_ok=True)
+    event_tensor = event_tensor.cpu().detach()
+
+    # Normalize and save each channel as a grayscale image
+    for i in range(event_tensor.shape[0]):
+        # Extract the channel and normalize it to [0, 255]
+        channel_data = event_tensor[i].numpy()
+        # import pdb; pdb.set_trace()
+        channel_min, channel_max = channel_data.min(), channel_data.max()
+        normalized_data = ((channel_data - channel_min) / (channel_max - channel_min) * 255).astype(np.uint8)
+        
+        # Create a PIL image
+        image = Image.fromarray(normalized_data)
+        
+        # Save the image
+        # output_path = os.path.join(output_dir, f"channel_{i + 1}.png")
+        image.save(f"{output_path}/channel_{i + 1}.png")
 
 def main():
     import open3d as o3d

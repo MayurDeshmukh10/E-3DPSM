@@ -71,7 +71,7 @@ class RealEventStream(Dataset):
         
     def get_event_batch(self, idx, num_events):
         if self.is_train:
-            max_frame_time = random.randint(15, self.max_frame_time)
+            max_frame_time = random.randint(2, self.max_frame_time)
         else:
             max_frame_time = self.max_frame_time
         
