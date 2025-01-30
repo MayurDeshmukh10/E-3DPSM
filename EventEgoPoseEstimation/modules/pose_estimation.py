@@ -133,9 +133,10 @@ class EventEgoPoseEstimation(LightningModule):
 
         self.automatic_optimization = False
 
+        # self.example_input_array = torch.Tensor(1, 1, 32768, 4)
+
 
     def forward(self, x):
-        import pdb; pdb.set_trace()
         return self.model(x)
     
     def setup(self, stage: str):
@@ -192,7 +193,8 @@ class EventEgoPoseEstimation(LightningModule):
             collate_fn=collate_variable_size,
             shuffle=True,
             num_workers=self.workers,
-            pin_memory=True
+            pin_memory=True,
+            drop_last=True
         )
         self.train_dataloader_len = len(dataloader)
         return dataloader
@@ -204,7 +206,8 @@ class EventEgoPoseEstimation(LightningModule):
             collate_fn=collate_variable_size,
             num_workers=self.workers,
             pin_memory=True,
-            drop_last=False
+            drop_last=False,
+            drop_last=True
         )
         self.val_dataloader_len = len(dataloader)
         return dataloader
@@ -397,7 +400,7 @@ class EventEgoPoseEstimation(LightningModule):
                 'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t' \
                 'MPJPE {acc.val:.4f} ({acc.avg:.4f})\t'.format(
                     batch_idx, self.val_dataloader_len, batch_time=self.batch_time,
-                    acc=self.acc_j3d)
+                    acc=self.acc_j3d_val)
             logger.info(msg)
 
         
