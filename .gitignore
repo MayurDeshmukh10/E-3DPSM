@@ -6,3 +6,7 @@ logs/
 output_images/
 visualizations/
 scripts/train.sh
+results/
+scripts/
+og_results/
+dataset_splits_ssm_branch/
