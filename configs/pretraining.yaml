@@ -9,7 +9,7 @@ model:
       input_channel: 18
       posenet_input_channel: 2
       image_size: [256, 192]
-      batch_size: 9 # individual batch size
+      batch_size: 32 #16 # 9 # individual batch size
       #heatmap_size: [config.MODEL.IMAGE_SIZE[0] // config.MODEL.HEAT_MAP_SCALE, config.MODEL.IMAGE_SIZE[1] // config.MODEL.HEAT_MAP_SCALE] TODO: fix this
     
     # dataset_cfg:
@@ -25,11 +25,14 @@ model:
 
     #   representaton: RawEvent
     #   event_batch_size: 4096
-
+    lr: 0.001
+    lr_decay_epochs:
+      - 10
+      - 15
     dataset_type: synthetic # real, synthetic
     training_type: pretrain # finetune
-    temporal_steps: 20
-    batch_size: 18
+    temporal_steps: 1
+    batch_size: 128
     workers: 16
 
 
@@ -38,15 +41,12 @@ trainer:
   accelerator: gpu
   max_epochs: 20
   check_val_every_n_epoch: 1
-  devices: 2
+  devices: 4
   benchmark: false
-  # precision: 16-mixed
-  limit_train_batches: 10000
+  precision: 16-mixed
   strategy: ddp_find_unused_parameters_true
-  # find_unused_parameters: true
-  # limit_test_batches: 5000
-  # limit_test_batches: 1
   fast_dev_run: false
+  # every_n_train_steps: 200
 #  gradient_clip_val: 5.0
 #  gradient_clip_algorithm: norm
   callbacks:
@@ -59,10 +59,25 @@ trainer:
         save_top_k: -1
         filename: "{epoch}"
     - class_path: EventEgoPoseEstimation.modules.pose_estimation.EvaluateCallback
+    - class_path: pytorch_lightning.callbacks.ModelCheckpoint
+      init_args:
+        every_n_train_steps: 10000
+        save_top_k: -1
+        filename: "epoch_{epoch:02d}_step_{step}"
+        # dirpath: "./results/"
+        save_last: True
 
   logger:
     - class_path: pytorch_lightning.loggers.TensorBoardLogger
       init_args:
         save_dir: ./results/
+
+# checkpoint_callback:
+#   _target_: pytorch_lightning.callbacks.ModelCheckpoint
+#   dirpath: "./results/"  # Directory to save checkpoints
+#   filename: "epoch_{epoch:02d}_step_{step}"  # Naming format
+#   save_top_k: -1  # Save all checkpoints (set to 1 if you want only the best one)
+#   every_n_train_steps: 200  # Save after every 10,000 training steps
+#   save_last: True  # Save the last checkpoint (optional)
     
 
