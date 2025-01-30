@@ -45,8 +45,20 @@ def create_logger(cfg, cfg_name, phase='train'):
                         format=head)
     logger = logging.getLogger()
     logger.setLevel(logging.INFO)
-    console = logging.StreamHandler()
-    logging.getLogger('').addHandler(console)
+
+
+    # Remove default console handler if it exists
+    for handler in logger.handlers:
+        if isinstance(handler, logging.StreamHandler):
+            logger.removeHandler(handler)
+
+    if not logger.hasHandlers():
+        file_handler = logging.FileHandler(str(final_log_file))
+        file_handler.setFormatter(logging.Formatter('%(asctime)-15s %(message)s'))
+        logger.addHandler(file_handler)  # Add only FileHandler, no StreamHandler
+
+    # console = logging.StreamHandler()
+    # logging.getLogger('').addHandler(console)
 
     tensorboard_log_dir = Path(cfg.LOG_DIR) / model / (cfg_name + '_' + time_str + '_' + experiment_name)
     print('=> creating {}'.format(tensorboard_log_dir))
