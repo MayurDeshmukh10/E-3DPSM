@@ -9,7 +9,7 @@ model:
       input_channel: 18
       posenet_input_channel: 2
       image_size: [256, 192]
-      batch_size: 32 #16 # 9 # individual batch size
+      batch_size: 16 #16 # 9 # individual batch size
       #heatmap_size: [config.MODEL.IMAGE_SIZE[0] // config.MODEL.HEAT_MAP_SCALE, config.MODEL.IMAGE_SIZE[1] // config.MODEL.HEAT_MAP_SCALE] TODO: fix this
     
     # dataset_cfg:
@@ -32,7 +32,7 @@ model:
     dataset_type: synthetic # real, synthetic
     training_type: pretrain # finetune
     temporal_steps: 1
-    batch_size: 128
+    batch_size: 64
     workers: 16
 
 

@@ -206,7 +206,6 @@ class EventEgoPoseEstimation(LightningModule):
             collate_fn=collate_variable_size,
             num_workers=self.workers,
             pin_memory=True,
-            drop_last=False,
             drop_last=True
         )
         self.val_dataloader_len = len(dataloader)
