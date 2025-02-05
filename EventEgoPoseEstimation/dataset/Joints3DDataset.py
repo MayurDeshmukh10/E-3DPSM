@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 
 class Joints3DDataset(Dataset):
-    def __init__(self, cfg, root, is_train):
+    def __init__(self, cfg, root, is_train, temporal_bins):
         super().__init__()
     
         self.is_train = is_train
@@ -24,43 +24,66 @@ class Joints3DDataset(Dataset):
         self.heatmap_size = np.array(cfg.MODEL.HEATMAP_SIZE)
         self.sigma = cfg.MODEL.SIGMA
 
+        self.temporal_bins = temporal_bins
+
         self.cfg = cfg
         self.db = []
 
     def __len__(self,):
         raise NotImplementedError
 
-    def transform(self, data, anno, kwargs):        
-        frame_index = data['frame_index']
-        rgb_frame_index = anno['rgb_frame_index']
-        
-        inp = data['input']    
-        
-        # coord_x = data['coord_x']
-        # coord_y = data['coord_y']
-        # segmentation_indices = data['segmentation_indices']
-        
-        segmentation_mask = anno['segmentation_mask']
+    def transform(self, data, anno, kwargs):     
+        j2ds = []
+        j3ds = []
+        vis_j2ds = []
+        vis_j3ds = []
+        valid_j3ds = []
+        frame_indexes = []
+        rgb_frame_indexes = []
+        scales_x = []
+        scales_y = []
+        valid_segs = []
+        ego_to_global_spaces = []
+        segmentation_masks = []
+        targets = []
 
-        ego_to_global_space = anno['ego_to_global_space']
-        j3d = anno['j3d']
-        j2d = anno['j2d']
-        vis_j2d = anno['vis_j2d']
-        vis_j3d = anno['vis_j3d']
-        valid_seg = float(anno['valid_seg'])
+        for i in range(self.temporal_bins):
+            rgb_frame_index = anno['rgb_frame_index'][i]
         
-        img_h, img_w = segmentation_mask.shape[:2]
+        
+            # coord_x = data['coord_x']
+            # coord_y = data['coord_y']
+            # segmentation_indices = data['segmentation_indices']
+            
+            segmentation_mask = anno['segmentation_mask'][i]
 
-        target_width = self.image_size[0]
-        target_height = self.image_size[1]
+            ego_to_global_space = anno['ego_to_global_space'][i]
+            j3d = anno['j3d'][i]
+            j2d = anno['j2d'][i]
+            vis_j2d = anno['vis_j2d'][i]
+            vis_j3d = anno['vis_j3d'][i]
+            valid_seg = float(anno['valid_seg'][i])
         
-        sx = target_width / img_w
-        sy = target_height / img_h
+            img_h, img_w = segmentation_mask.shape[:2]
 
-        segmentation_mask = cv2.resize(segmentation_mask, (int(target_width), int(target_height)), interpolation=cv2.INTER_AREA)
+            target_width = self.image_size[0]
+            target_height = self.image_size[1]
+            
+            sx = target_width / img_w
+            sy = target_height / img_h
+
+            segmentation_mask = cv2.resize(segmentation_mask, (int(target_width), int(target_height)), interpolation=cv2.INTER_AREA)
+            segmentation_mask = torch.from_numpy(segmentation_mask).float().unsqueeze(0)
+
+            # inp_tensor = torch.clamp_(inp_tensor, 0, 1)
+            segmentation_mask = torch.clamp_(segmentation_mask, 0, 1)
         
-        j2d[:, 0] *= sx
-        j2d[:, 1] *= sy
+            j2d[:, 0] *= sx
+            j2d[:, 1] *= sy
+
+        
+
+
 
         # if "augment" in kwargs and kwargs['augment'] is True:                        
         #     add_mask = (np.random.rand(target_height, target_width, 2) > 0.9995).astype(np.float32)
@@ -85,78 +108,119 @@ class Joints3DDataset(Dataset):
         #         j2d = transforms.flip_lr_joints(inp, j2d)
                 
         # inp_tensor = torch.from_numpy(inp).permute(2, 0, 1).float()
-        segmentation_mask = torch.from_numpy(segmentation_mask).float().unsqueeze(0)
+        # segmentation_mask = torch.from_numpy(segmentation_mask).float().unsqueeze(0)
 
-        # inp_tensor = torch.clamp_(inp_tensor, 0, 1)
-        segmentation_mask = torch.clamp_(segmentation_mask, 0, 1)
+        # # inp_tensor = torch.clamp_(inp_tensor, 0, 1)
+        # segmentation_mask = torch.clamp_(segmentation_mask, 0, 1)
 
         
-        inp_h, inp_w = inp.shape[:2]
+        # inp_h, inp_w = inp.shape[:2]
 
         # invalid_j2d = (j2d[:, 0] < 0) + (j2d[:, 1] < 0) + (j2d[:, 0] >= inp_w) + (j2d[:, 1] >= inp_h)
         # valid_j2d = 1 - invalid_j2d[:, None]
-        valid_j2d = np.ones_like(j2d)
+            valid_j2d = np.ones_like(j2d)
 
-        # During validation, the network should learn a prior for the occluded joints.
-        if self.is_train is False:
-            if vis_j3d.mean() > 0:
-                vis_j3d = np.ones_like(vis_j3d)
-            else:
-                vis_j3d = np.zeros_like(vis_j3d)
+            # During validation, the network should learn a prior for the occluded joints.
+            if self.is_train is False:
+                if vis_j3d.mean() > 0:
+                    vis_j3d = np.ones_like(vis_j3d)
+                else:
+                    vis_j3d = np.zeros_like(vis_j3d)
 
-            if vis_j2d.mean() > 0:
-                vis_j2d = np.ones_like(vis_j2d)
-            else:
-                vis_j2d = np.zeros_like(vis_j2d)
-            
-        vis_j2d = vis_j2d * valid_j2d
-        target, vis_j2d = self.generate_target(j2d, vis_j2d)
-        
-        if self.is_train: # During training, we apply weights to the joints.
-            heatmap_sequence = {"Head": 1, # 0
-                                "Neck": 1, # 1
-                                "Right_shoulder": 1, # 2 
-                                "Right_elbow": 1.5, # 3
-                                "Right_wrist": 1.5, # 4
-                                "Left_shoulder": 1, # 5
-                                "Left_elbow": 1.5, # 6
-                                "Left_wrist": 1.5, # 7
-                                "Right_hip": 1, # 8
-                                "Right_knee": 2, # 9
-                                "Right_ankle": 2, # 10
-                                "Right_foot": 2, # 11
-                                "Left_hip": 1, # 12 
-                                "Left_knee": 2, # 13
-                                "Left_ankle": 2, #14
-                                "Left_foot": 2} # 15
-
-            weight = [w for _, w in heatmap_sequence.items()]
-            weight = np.array(weight)[:, None]
-            vis_j2d = vis_j2d * weight
-            vis_j3d = vis_j3d * weight
-        
-        target = torch.from_numpy(target)
-        j3d = torch.from_numpy(j3d)
-        j2d = torch.from_numpy(j2d)
+                if vis_j2d.mean() > 0:
+                    vis_j2d = np.ones_like(vis_j2d)
+                else:
+                    vis_j2d = np.zeros_like(vis_j2d)
                 
-        vis_j2d = torch.from_numpy(vis_j2d)
-        vis_j3d = torch.from_numpy(vis_j3d)
+            vis_j2d = vis_j2d * valid_j2d
+            target, vis_j2d = self.generate_target(j2d, vis_j2d)
+
+
+            if self.is_train: # During training, we apply weights to the joints.
+                heatmap_sequence = {"Head": 1, # 0
+                                    "Neck": 1, # 1
+                                    "Right_shoulder": 1, # 2 
+                                    "Right_elbow": 1.5, # 3
+                                    "Right_wrist": 1.5, # 4
+                                    "Left_shoulder": 1, # 5
+                                    "Left_elbow": 1.5, # 6
+                                    "Left_wrist": 1.5, # 7
+                                    "Right_hip": 1, # 8
+                                    "Right_knee": 2, # 9
+                                    "Right_ankle": 2, # 10
+                                    "Right_foot": 2, # 11
+                                    "Left_hip": 1, # 12 
+                                    "Left_knee": 2, # 13
+                                    "Left_ankle": 2, #14
+                                    "Left_foot": 2} # 15
+
+                weight = [w for _, w in heatmap_sequence.items()]
+                weight = np.array(weight)[:, None]
+                vis_j2d = vis_j2d * weight
+                vis_j3d = vis_j3d * weight
+        
+            target = torch.from_numpy(target)
+            j3d = torch.from_numpy(j3d)
+            j2d = torch.from_numpy(j2d)
+                    
+            vis_j2d = torch.from_numpy(vis_j2d)
+            vis_j3d = torch.from_numpy(vis_j3d)
+
+            j2ds.append(j2d)
+            j3ds.append(j3d)
+            vis_j2ds.append(vis_j2d[:, :1])
+            vis_j3ds.append(vis_j2d[:, :1])
+            valid_j3ds.append(vis_j3d[:, :1])
+            rgb_frame_indexes.append(rgb_frame_index)
+            scales_x.append(sx)
+            scales_y.append(sy)
+            valid_segs.append(valid_seg)
+            ego_to_global_spaces.append(ego_to_global_space)
+            segmentation_masks.append(segmentation_mask)
+            targets.append(target)
+
+
+        inp = data['input']
+        frame_indexes = data['frame_index']
+
+        # meta = {
+        #     'j2d': j2d,
+        #     'j3d': j3d,
+        #     'vis_j2d': vis_j2d[:, :1],
+        #     'vis_j3d': vis_j2d[:, :1],
+        #     'valid_j3d': vis_j3d[:, :1],
+        #     'frame_index': frame_index,
+        #     'rgb_frame_index': rgb_frame_index,
+        #     'scale_x': sx,
+        #     'scale_y': sy,
+        #     'valid_seg': valid_seg,
+        #     'ego_to_global_space': ego_to_global_space,
+        # }
+        j2ds = torch.stack(j2ds, dim=0)
+        j3ds = torch.stack(j3ds, dim=0)
+        vis_j2ds = torch.stack(vis_j2ds, dim=0)
+        vis_j3ds = torch.stack(vis_j3ds, dim=0)
+        valid_j3ds = torch.stack(valid_j3ds, dim=0)
+        segmentation_masks = torch.stack(segmentation_masks, dim=0)
+        targets = torch.stack(targets, dim=0)
+        
 
         meta = {
-            'j2d': j2d,
-            'j3d': j3d,
-            'vis_j2d': vis_j2d[:, :1],
-            'vis_j3d': vis_j2d[:, :1],
-            'valid_j3d': vis_j3d[:, :1],
-            'frame_index': frame_index,
-            'rgb_frame_index': rgb_frame_index,
-            'scale_x': sx,
-            'scale_y': sy,
-            'valid_seg': valid_seg,
-            'ego_to_global_space': ego_to_global_space,
+            'j2d': j2ds,
+            'j3d': j3ds,
+            'vis_j2d': vis_j2ds,
+            'vis_j3d': vis_j3ds,
+            'valid_j3d': valid_j3ds,
+            'frame_index': frame_indexes,
+            'rgb_frame_index': rgb_frame_indexes,
+            'scale_x': scales_x,
+            'scale_y': scales_y,
+            'valid_seg': valid_segs,
+            'ego_to_global_space': ego_to_global_spaces,
         }
 
-        return {'x': inp, 'hms': target, 'weight': vis_j2d, 'j3d': j3d, 'j2d': j2d, 'segmentation_mask': segmentation_mask}, meta
+        return {'x': inp, 'hms': targets, 'weight': vis_j2ds, 'j3d': j3ds, 'j2d': j2ds, 'segmentation_mask': segmentation_masks}, meta
+        # return {'x': inp, 'hms': target, 'weight': vis_j2d, 'j3d': j3d, 'j2d': j2d, 'segmentation_mask': segmentation_mask}, meta
 
     def generate_target(self, joints, joints_vis):
         '''

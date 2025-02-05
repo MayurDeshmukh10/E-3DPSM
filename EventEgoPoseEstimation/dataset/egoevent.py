@@ -13,7 +13,7 @@ from EventEgoPoseEstimation.dataset.egoevent_real import RealEventStream
 from EventEgoPoseEstimation.dataset.dataset_utils import generate_path_split, generate_indices
 
 
-def get_representation(cfg, width, height):
+def get_representation(cfg, width, height, temporal_bins):
     representation = cfg.DATASET.REPRESENTATION
     
     if representation == 'EROS':
@@ -24,7 +24,7 @@ def get_representation(cfg, width, height):
     elif representation == 'EventFrame':
         repr = EventFrame(cfg, height, width)
     elif representation == 'RawEvent':
-        repr = RawEvent(cfg, height, width)
+        repr = RawEvent(cfg, height, width, temporal_bins)
     else:
         raise NotImplementedError
 
@@ -33,38 +33,63 @@ def get_representation(cfg, width, height):
 
 class SingleSequenceDataset(Joints3DDataset):    
     def prepare_anno(self, item):
-        ego_to_global_space = item['ego_to_global_space']
-        j3d = item['ego_j3d']
-        j2d = item['ego_j2d']
-        segmentation_mask = item['segmentation_mask']
-        valid_seg = item['valid_seg']
-        rgb_frame_index = item['rgb_frame_index']
+        rgb_indexes = []
+        ego_j3ds = []
+        ego_j2ds = []
+        segmentation_masks = []
+        vis_j2ds = []
+        vis_j3ds = []
+        valid_seg_list = []
+        ego_to_global_space_list = []
+        for i in range(self.temporal_bins):
+            if item['ego_to_global_space'] is None:
+                ego_to_global_space = None
+            else:
+                ego_to_global_space = item['ego_to_global_space'][i]
+            j3d = item['ego_j3d'][i]
+            j2d = item['ego_j2d'][i]
+            segmentation_mask = item['segmentation_mask'][i]
+            if type(item['valid_seg']) == bool:
+                valid_seg = item['valid_seg']
+            else:
+                valid_seg = item['valid_seg'][i]
+            rgb_frame_index = item['rgb_frame_index'][i]
 
-        if j3d is None or j2d is None:
-            vis_j2d = np.zeros((self.num_joints, 2))
-            vis_j3d = np.zeros((self.num_joints, 3))
-            j3d = np.ones((self.num_joints, 3)) * -1
-            j2d = np.ones((self.num_joints, 2)) * -1
-        else:
-            vis_j2d = np.ones_like(j2d)
-            vis_j3d = np.ones_like(j3d)
+            if j3d is None or j2d is None:
+                vis_j2d = np.zeros((self.num_joints, 2))
+                vis_j3d = np.zeros((self.num_joints, 3))
+                j3d = np.ones((self.num_joints, 3)) * -1
+                j2d = np.ones((self.num_joints, 2)) * -1
+            else:
+                vis_j2d = np.ones_like(j2d)
+                vis_j3d = np.ones_like(j3d)
 
-        if ego_to_global_space is None:
-            ego_to_global_space = np.eye(4)
+            if ego_to_global_space is None:
+                ego_to_global_space = np.eye(4)
+
+            rgb_indexes.append(int(rgb_frame_index))
+            ego_j3ds.append(j3d.astype(np.float32))
+            ego_j2ds.append(j2d.astype(np.float32))
+            segmentation_masks.append(segmentation_mask)
+            valid_seg_list.append(valid_seg)
+            vis_j2ds.append(vis_j2d.astype(np.float32))
+            vis_j3ds.append(vis_j3d.astype(np.float32))
+            ego_to_global_space_list.append(ego_to_global_space)
+
 
         return {
-                'valid_seg': valid_seg,
-                'j2d': j2d.astype(np.float32),
-                'j3d': j3d.astype(np.float32),	
-                'vis_j2d': vis_j2d.astype(np.float32),
-                'vis_j3d': vis_j3d.astype(np.float32),
-                'segmentation_mask': segmentation_mask,
-                'ego_to_global_space': ego_to_global_space,
-                'rgb_frame_index': int(rgb_frame_index)
+                'valid_seg': valid_seg_list,
+                'j2d': ego_j2ds,
+                'j3d': ego_j3ds,	
+                'vis_j2d': vis_j2ds,
+                'vis_j3d': vis_j3ds,
+                'segmentation_mask': segmentation_masks,
+                'ego_to_global_space': ego_to_global_space_list,
+                'rgb_frame_index': rgb_indexes
             }
     
-    def __init__(self, cfg, data_path, is_train):
-        super().__init__(cfg, data_path, is_train)
+    def __init__(self, cfg, data_path, is_train, temporal_bins):
+        super().__init__(cfg, data_path, is_train, temporal_bins)
 
         if cfg.DATASET.TYPE == 'Synthetic':
             dataset = SyntheticEventStream(data_path, cfg, is_train)
@@ -80,7 +105,9 @@ class SingleSequenceDataset(Joints3DDataset):
         self.width = width
         self.height = height
 
-        self.repr = get_representation(cfg, width, height)
+        self.temporal_bins = temporal_bins
+
+        self.repr = get_representation(cfg, width, height, temporal_bins)
 
         self.visualize = self.repr.visualize
         print(f'{data_path} => load {len(self.dataset)} samples')
@@ -112,16 +139,17 @@ class SingleSequenceDataset(Joints3DDataset):
             data_batch = data_batch[choices, :]
 
         data = self.repr(data_batch)
-        frame_index = data['frame_index']
+        # frame_index = data['frame_index']
+        frame_indexes = data['frame_index']
 
-        anno = self.dataset.get_annoation(frame_index)
+        anno = self.dataset.get_annoation(frame_indexes)
         anno = self.prepare_anno(anno)
 
         return self.transform(data, anno, kwargs)
 
 
 class EgoEvent(Dataset): 
-    def __init__(self, cfg, split, finetune=False):
+    def __init__(self, cfg, split, temporal_bins, finetune=False):
         super().__init__()
 
         cfg = copy.deepcopy(cfg)
@@ -164,7 +192,7 @@ class EgoEvent(Dataset):
         datasets = list()
         for item in self.items:
             data_path = dataset_root / item
-            dataset = SingleSequenceDataset(cfg, data_path, is_train)
+            dataset = SingleSequenceDataset(cfg, data_path, is_train, temporal_bins=temporal_bins)
             if dataset.isvalid():
                 self.visualize = dataset.visualize
                 datasets.append(dataset)

@@ -249,13 +249,102 @@ class EventFrame:
 
         return ef
     
+def compute_temporal_weights(ts, num_bins):
+
+    ts = torch.from_numpy(ts).float()
+    # Ensure ts is in [0, 1]
+    ts = torch.clamp(ts, 0.0, 1.0)
+    scaled_ts = ts * (num_bins - 1)
+    lower_bin = torch.floor(scaled_ts).long()
+    upper_bin = lower_bin + 1
+    fractional = scaled_ts - lower_bin
+
+    # Clamp bins to valid range
+    lower_bin = torch.clamp(lower_bin, 0, num_bins - 1)
+    upper_bin = torch.clamp(upper_bin, 0, num_bins - 1)
+
+    weights = torch.zeros((ts.shape[0], num_bins), device=ts.device)
+    rows = torch.arange(ts.size(0), device=ts.device)
+    
+    
+    # Assign weights to lower and upper bins
+    weights[rows, lower_bin] = 1 - fractional
+    weights[rows, upper_bin] = fractional
+    
+    return weights
+
+def interpolate_empty_bins(bin_frame_indices, sum_weighted_fs, sum_weights):
+    # After computing initial bin_frame_indices with -1 for empty bins:
+    average_fs = sum_weighted_fs / (sum_weights + 1e-6)
+    bin_frame_indices = torch.round(average_fs).to(torch.long)
+    valid_mask = sum_weights != 0
+
+    # Handle interpolation for bins with no events
+    if not torch.any(valid_mask):
+        # Fallback if ALL bins are empty (set to first frame index or other default)
+        bin_frame_indices[:] = 0  
+    else:
+        num_bins = bin_frame_indices.size(0)
+        device = bin_frame_indices.device
+        
+        # Find nearest valid neighbors
+        bin_indices = torch.arange(num_bins, device=device)
+        
+        # 1. Find previous valid indices
+        prev_valid = -torch.ones(num_bins, dtype=torch.long, device=device)
+        last_valid = -1
+        for i in range(num_bins):
+            if valid_mask[i]:
+                last_valid = i
+            prev_valid[i] = last_valid
+        
+        # 2. Find next valid indices
+        next_valid = -torch.ones(num_bins, dtype=torch.long, device=device)
+        first_valid = -1
+        for i in reversed(range(num_bins)):
+            if valid_mask[i]:
+                first_valid = i
+            next_valid[i] = first_valid
+        
+        # 3. Interpolate missing values
+        for i in range(num_bins):
+            if valid_mask[i]: continue
+                
+            prev_idx = prev_valid[i].item()
+            next_idx = next_valid[i].item()
+            
+            if prev_idx == -1 and next_idx == -1:
+                continue  # Handled by fallback case
+                
+            elif prev_idx == -1:  # Only next valid exists
+                bin_frame_indices[i] = bin_frame_indices[next_idx]
+                
+            elif next_idx == -1:  # Only previous valid exists
+                bin_frame_indices[i] = bin_frame_indices[prev_idx]
+                
+            else:  # Linear interpolation between neighbors
+                pos = i
+                prev_pos = prev_idx
+                next_pos = next_idx
+                
+                # Weight by inverse distance
+                total_dist = next_pos - prev_pos
+                prev_weight = (next_pos - pos) / total_dist
+                next_weight = (pos - prev_pos) / total_dist
+                
+                interpolated = (prev_weight * bin_frame_indices[prev_idx].float() +
+                            next_weight * bin_frame_indices[next_idx].float()).round().long()
+                bin_frame_indices[i] = interpolated
+    return bin_frame_indices
 
 class RawEvent:
-    def __init__(self, cfg, height, width):
+    def __init__(self, cfg, height, width, temporal_bins):
         self.height = height
         self.width = width
 
         self.resize_transform = ResizeTransform(cfg, height, width)
+
+        self.temporal_bins = temporal_bins
 
     def __call__(self, data_batch) -> Any:
         if data_batch.shape[-1] == 6:
@@ -280,12 +369,33 @@ class RawEvent:
         # ts = (ts[-1] - ts) * 1e-3 # microseconds to milliseconds
         # ts = ts * 1e-3 # microseconds to milliseconds 
 
+        # print("frame index: ", fs[-1])
+
         xs, ys = self.resize_transform(xs, ys)
         width, height = self.resize_transform.width, self.resize_transform.height
 
         xs = xs.astype(np.int32)
         ys = ys.astype(np.int32)
         ps = ps.astype(np.int32)
+
+        fs = torch.from_numpy(fs)
+
+        weights = compute_temporal_weights(ts, self.temporal_bins)
+        weighted_fs = weights * fs.unsqueeze(1)  # [num_events, num_bins]
+        sum_weighted_fs = torch.sum(weighted_fs, dim=0)  # [num_bins]
+        sum_weights = torch.sum(weights, dim=0)  # [num_bins]
+
+        # Avoid division by zero
+        average_fs = sum_weighted_fs / (sum_weights + 1e-6)
+        bin_frame_indices = torch.round(average_fs).to(torch.long)
+
+        # Handle bins with no events (optional: interpolate or use default)
+        # TODO: Add interpolation for empty bins
+        bin_frame_indices[sum_weights == 0] = -1  # Placeholder for no data
+        # bin_frame_indices = interpolate_empty_bins(bin_frame_indices, sum_weighted_fs, sum_weights)
+
+        # print("frame index: ", fs[-1])
+        # print("bin_frame_indices: ", bin_frame_indices)
 
         events_tensor = np.stack([xs, ys, ts, ps], axis=1)
 
@@ -299,7 +409,8 @@ class RawEvent:
         }
 
         if data_batch.shape[-1] >= 5:
-            data['frame_index'] = fs[-1]            
+            # data['frame_index'] = fs[-1]
+            data['frame_index'] = bin_frame_indices        
         
         if data_batch.shape[-1] == 6:
             data['segmentation_indices'] = segmentation.astype(np.uint8)

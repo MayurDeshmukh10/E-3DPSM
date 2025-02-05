@@ -197,6 +197,10 @@ def collate_variable_size(batch):
         # events = torch.from_numpy(np.concatenate(events,0))
         # events = torch.from_numpy(np.vstack(events))
         # events = torch.from_numpy(events)
+        # for item in data_list:
+        #     for x in item['hms']:
+        #         print('item', x.shape)
+        
         collated_data = {
             'x': events,
             'hms': torch.stack([item['hms'] for item in data_list]),

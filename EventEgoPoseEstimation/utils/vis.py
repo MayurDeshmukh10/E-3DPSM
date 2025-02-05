@@ -14,7 +14,7 @@ from EventEgoPoseEstimation.utils.heatmap import get_max_preds
 from EventEgoPoseEstimation.utils.skeleton import Skeleton
 
 
-def save_batch_images(self, batch_image, tag, nrow=8, padding=2, n_images=4, shuffle=False):
+def save_batch_images(self, batch_image, tag, global_step, nrow=8, padding=2, n_images=4, shuffle=False):
     '''
     batch_image: [batch_size, channel, height, width]
     '''
@@ -27,16 +27,16 @@ def save_batch_images(self, batch_image, tag, nrow=8, padding=2, n_images=4, shu
 
     if shuffle:
         idx = np.random.choice(batch_image.shape[0], n_images, replace=False)
-        batch_image = batch_image[idx]
+        batch_image = batch_image[idx][-1]
     else:
-        batch_image = batch_image[:n_images]
+        batch_image = batch_image[:n_images][-1]
 
     grid = torchvision.utils.make_grid(batch_image, nrow, padding, True)
     ndarr = grid.mul(255).clamp(0, 255).byte().permute(1, 2, 0).cpu().numpy()
     ndarr = ndarr.copy()
     
     # writer.add_image(tag, ndarr.transpose(2, 0, 1), global_step)
-    self.logger.experiment.add_image(tag, ndarr.transpose(2, 0, 1))
+    self.logger.experiment.add_image(tag, ndarr.transpose(2, 0, 1), global_step)
 
 
 
@@ -83,7 +83,7 @@ def save_batch_image_with_joints(self, batch_image, batch_joints, batch_joints_v
     # cv2.imwrite(file_name, ndarr)
     # writer.add_image(tag, ndarr.transpose(2, 0, 1), global_step)
     # self.log(tag, ndarr.transpose(2, 0, 1), global_step)
-    self.logger.experiment.add_image(tag, ndarr.transpose(2, 0, 1))
+    self.logger.experiment.add_image(tag, ndarr.transpose(2, 0, 1), global_step)
 
 def save_batch_location_maps(gt_lms, pred_lms, tag, writer, global_step, n_images=4):
     pred_lms = pred_lms[:n_images].detach()
@@ -193,10 +193,10 @@ def save_batch_heatmaps(self, batch_image, batch_heatmaps, tag, global_step,
     # cv2.imwrite(file_name, grid_image)
     # writer.add_image(tag, grid_image.transpose(2, 0, 1), global_step)
     # self.log(tag, grid_image.transpose(2, 0, 1), global_step)
-    self.logger.experiment.add_image(tag, grid_image.transpose(2, 0, 1))
+    self.logger.experiment.add_image(tag, grid_image.transpose(2, 0, 1), global_step)
 
 
-def save_debug_images(self, config, input, meta, target, joints_pred, output, prefix, global_step, n_images=4):
+def save_debug_images(self, config, input, meta, target, output, prefix, global_step, n_images=4):
     if config.DEBUG.SAVE_BATCH_IMAGES_GT:
         save_batch_image_with_joints(self,
             input, 
@@ -205,14 +205,14 @@ def save_debug_images(self, config, input, meta, target, joints_pred, output, pr
             f'{prefix}_gt', 
             global_step, n_images=n_images
         )
-    if config.DEBUG.SAVE_BATCH_IMAGES_PRED:
-        save_batch_image_with_joints(self,                        
-            input, 
-            joints_pred, meta['vis_j2d'],
-            f'{prefix}_pred',
-            global_step,
-            n_images=n_images
-        )
+    # if config.DEBUG.SAVE_BATCH_IMAGES_PRED:
+    #     save_batch_image_with_joints(self,                        
+    #         input, 
+    #         joints_pred, meta['vis_j2d'],
+    #         f'{prefix}_pred',
+    #         global_step,
+    #         n_images=n_images
+    #     )
     if config.DEBUG.SAVE_HEATMAPS_GT:
         save_batch_heatmaps(self,
             input, 
@@ -282,6 +282,26 @@ def generate_skeleton_image(gt_j3d, pred_j3d):
     return color
 
 
+def dump_sketelon_image(j3d_joints, file_name):
+    skeleton = Skeleton((0.9, 0.1, 0.1))
+    node = None
+    try:
+        mesh = skeleton.joints_2_trimesh(j3d_joints)    
+        mesh = pyrender.Mesh.from_trimesh(mesh)
+        node = pyrender.Node(mesh=mesh)
+        scene.add_node(node)
+    except:
+        traceback.print_exc()   
+    
+    color, depth = renderer.render(scene)
+
+    if node is not None:
+        scene.remove_node(node)
+
+    cv2.imwrite(file_name, color)
+
+
+
 def save_debug_3d_joints(self, config, inp, meta, gt_j3d, pred_j3d, prefix, global_step):    
     idx = np.random.randint(0, int(self.batch_size))
     
@@ -291,12 +311,13 @@ def save_debug_3d_joints(self, config, inp, meta, gt_j3d, pred_j3d, prefix, glob
     if isinstance(pred_j3d, torch.Tensor):
         pred_j3d = pred_j3d.detach().cpu().numpy()
 
-    gt_j3d = gt_j3d[idx] / 1000 # mm -> m
-    pred_j3d = pred_j3d[idx] / 1000 # mm -> m
+    # TODO: Update this to save all temporal bin predictions
+    gt_j3d = gt_j3d[idx][-1] / 1000 # mm -> m
+    pred_j3d = pred_j3d[idx][-1] / 1000 # mm -> m
 
     color = generate_skeleton_image(gt_j3d, pred_j3d)
     # writer.add_image(prefix + '_j3d', color, global_step, dataformats='HWC')
-    self.logger.experiment.add_image(prefix + '_j3d', color, dataformats='HWC')
+    self.logger.experiment.add_image(prefix + '_j3d', color, global_step, dataformats='HWC')
 
 
     return color
@@ -307,8 +328,8 @@ def save_debug_segmenation(self, config, inp, meta, gt_seg, pred_seg, prefix, gl
         n_images = int(self.batch_size)
     else:
         n_images = 4
-    save_batch_images(self, gt_seg, f'{prefix}_seg_gt', n_images=n_images)
-    save_batch_images(self, pred_seg, f'{prefix}_seg_pred', n_images=n_images)
+    save_batch_images(self, gt_seg, f'{prefix}_seg_gt', global_step, n_images=n_images)
+    save_batch_images(self, pred_seg, f'{prefix}_seg_pred', global_step, n_images=n_images)
 
 
 def save_debug_eros(self, config, inp, meta, eros, prefix, global_step):
@@ -316,7 +337,7 @@ def save_debug_eros(self, config, inp, meta, eros, prefix, global_step):
         n_images = int(self.batch_size)
     else:
         n_images = 4
-    save_batch_images(self, eros, f'{prefix}_eros', shuffle=True, n_images=n_images)
+    save_batch_images(self, eros, f'{prefix}_eros', global_step, shuffle=True, n_images=n_images)
  
  
 def plot_heatmaps(image, heatmaps):
@@ -482,20 +503,55 @@ def visualize_temporal_bins(event_tensor, output_path):
     os.makedirs(output_path, exist_ok=True)
     event_tensor = event_tensor.cpu().detach()
 
+    temporal_bins = int(event_tensor.shape[0] / 2)
+    # temporal_bins = int(event_tensor.shape[0])
+    
     # Normalize and save each channel as a grayscale image
-    for i in range(event_tensor.shape[0]):
+    for i in range(temporal_bins):
         # Extract the channel and normalize it to [0, 255]
-        channel_data = event_tensor[i].numpy()
+        polarity_0 = event_tensor[i].numpy()
+        polarity_1 = event_tensor[i + temporal_bins].numpy()
+
+
+        rgb_image = np.zeros((polarity_0.shape[0], polarity_0.shape[1], 3), dtype=np.float32)
+        # rgb_image = np.zeros((polarity_0.shape[0], polarity_0.shape[1], 1), dtype=np.float32)
+
+        # rgb_image[:, :, 0] = (polarity_0 != 0).astype(np.float32)
+        # rgb_image[:, :, 0] = (polarity_0 != 0).astype(np.float32)
+        # rgb_image[:, :, 2] = (polarity_1 != 0).astype(np.float32)
+
+        if polarity_1.max() - polarity_1.min() == 0:
+            division = 1
+        else:
+            division = polarity_1.max() - polarity_1.min()
+
+        rgb_image[:, :, 0] = (polarity_0 - polarity_0.min()) / division
+        rgb_image[:, :, 2] = (polarity_1 - polarity_1.min()) / division
+
+        # rgb_image[:, :, 0] = polarity_0.
+
+        rgb_image = (rgb_image * 255).astype(np.uint8)
+
+
         # import pdb; pdb.set_trace()
-        channel_min, channel_max = channel_data.min(), channel_data.max()
-        normalized_data = ((channel_data - channel_min) / (channel_max - channel_min) * 255).astype(np.uint8)
+        # # channel_min, channel_max = channel_data.min(), channel_data.max()
+        # # if channel_max == channel_min:
+        #     # continue
+        # polarity_0_normalized = ((polarity_0 - polarity_0.min()) / (polarity_0.max() - polarity_0.min()) * 255).astype(np.uint8)
+        # polarity_1_normalized = ((polarity_1 - polarity_1.min()) / (polarity_1.max() - polarity_1.min()) * 255).astype(np.uint8)
         
-        # Create a PIL image
-        image = Image.fromarray(normalized_data)
+        # g = np.zeros((polarity_0_normalized.shape[0], polarity_0_normalized.shape[1], 1), dtype=np.uint8)
+        
+        # image_data = np.concatenate((polarity_0_normalized[:, :, np.newaxis], polarity_1_normalized[:, :, np.newaxis], g), axis=2)
+        
+        # # Create a PIL image
+        # # import pdb; pdb.set_trace()
+        # image = Image.fromarray(image_data)
         
         # Save the image
         # output_path = os.path.join(output_dir, f"channel_{i + 1}.png")
-        image.save(f"{output_path}/channel_{i + 1}.png")
+        cv2.imwrite(f"{output_path}/temporal_{i + 1}.png", rgb_image)
+        # image.save(f"{output_path}/temporal_{i + 1}.png")
 
 def main():
     import open3d as o3d

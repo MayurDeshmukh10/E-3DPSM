@@ -6,6 +6,59 @@ from .s5.s5_model import S5Block
 import torch.nn.functional as F
 from einops import rearrange
 
+
+class DeltaHead(nn.Module):
+    def __init__(self, in_channels, num_joints):
+        """
+        Args:
+            in_channels (int): Number of input channels from the feature map.
+            num_joints (int): Number of joints to predict.
+        """
+        super(DeltaHead, self).__init__()
+        self.num_joints = num_joints
+        
+        # A simple head using convolutional layers followed by adaptive pooling
+        self.conv1 = nn.Conv2d(in_channels, 64, kernel_size=3, padding=1)
+        self.bn1   = nn.BatchNorm2d(64)
+        self.relu  = nn.ReLU(inplace=True)
+        
+        # Optionally, add another conv layer to refine the features
+        self.conv2 = nn.Conv2d(64, 64, kernel_size=3, padding=1)
+        self.bn2   = nn.BatchNorm2d(64)
+        
+        # Global pooling to collapse spatial dimensions to 1x1
+        self.global_pool = nn.AdaptiveAvgPool2d((1, 1))
+        
+        # A fully connected layer to map to the delta predictions per joint (3 coordinates per joint)
+        self.fc = nn.Linear(64, num_joints * 3)
+
+    def forward(self, features):
+        """
+        Args:
+            features (Tensor): Input feature map of shape [B, in_channels, H, W]
+        Returns:
+            delta (Tensor): Predicted deltas of shape [B, num_joints, 3]
+        """
+        # Pass through convolutional layers
+        x = self.conv1(features)    # [B, 64, H, W]
+        x = self.bn1(x)
+        x = self.relu(x)
+        
+        x = self.conv2(x)           # [B, 64, H, W]
+        x = self.bn2(x)
+        x = self.relu(x)
+        
+        # Global average pooling
+        x = self.global_pool(x)     # [B, 64, 1, 1]
+        x = x.view(x.size(0), -1)     # [B, 64]
+        
+        # Fully connected layer to produce deltas
+        x = self.fc(x)              # [B, num_joints * 3]
+        
+        # Reshape to [B, num_joints, 3]
+        delta = x.view(x.size(0), self.num_joints, 3)
+        return delta
+
 class JointRegressor(nn.Module):
     def __init__(self, in_channels, n_joints):
         super(JointRegressor, self).__init__()
@@ -150,6 +203,8 @@ class Event3DPoseNet(nn.Module):
         self.heatmap_head = Head(2 * 32, self.n_joints, activation='relu')
         self.segmentation_head = Head(2 * 32, 1)
                 
+        self.delta_head = DeltaHead(in_channels=192, num_joints=self.n_joints)
+
         self.joint_regressor_hms = JointRegressor(16, self.n_joints)
 
         # self.upsample_blocks = nn.ModuleList([
@@ -158,7 +213,7 @@ class Event3DPoseNet(nn.Module):
         #     UpSample(192)
         # ])
 
-    def forward(self, x, states):
+    def forward(self, x, states, initial_pose):
         H, W = x.shape[-2:]
         B = x.shape[0]
         sequence_length = 1
@@ -166,8 +221,16 @@ class Event3DPoseNet(nn.Module):
         # Input shape: [B, C, H, W] where C = 2 * num_bins
         outputs = []
 
+        pose = initial_pose.cuda()
+
         feature_maps = {}
         states_store = {}
+
+
+        abs_poses = []
+        delta_poses = []
+        seg_f_detached_list = []
+        seg_out_list = []
 
         # if states is None:
         #     initial_states = []
@@ -186,19 +249,24 @@ class Event3DPoseNet(nn.Module):
 
         for i in range(self.num_bins):
             
-            x_bin = input[:, i*2:(i+1)*2, :, :]
+            # x_bin = input[:, i*2:(i+1)*2, :, :]
+            x_bin = input[:, [i, i + self.num_bins], :, :]
+
             x = self.conv1(x_bin)
-            feature_maps[i] = []
+
+            feature_maps = []
 
             internal_states = []
             for blaze_block in self.backbone1:
                 x = blaze_block(x)
-                feature_maps[i].append(x)
+                feature_maps.append(x)
+                # feature_maps[i].append(x)
                 # feature_maps.append(x)
                 # internal_states.append(current_block_state)
 
             
-            x = feature_maps[i][-1]
+            x = feature_maps[-1]
+            feature_maps = feature_maps[::-1]
             h_new, w_new = x.shape[-2:]
             if states is None:
                 states = self.s5_block.s5.initial_state(
@@ -213,60 +281,45 @@ class Event3DPoseNet(nn.Module):
             x, states = self.s5_block(x, states)
 
             states = states.detach()
-            # memory_stats = torch.cuda.memory_stats("cuda:0")
-            # print(f"Peak reserved memory: {memory_stats['reserved_bytes.all.peak'] / (1024 ** 2):.2f} MB")
+
             x = rearrange(
                 x, "(B H W) 1 C -> B C H W", B=B, H=int(h_new), W=int(w_new)
             )
+            last_layer_features = x
+
             states = rearrange(states, "(B H W) C -> B C H W", H=h_new, W=w_new)
 
-            # state = current_block_state
-            # states_store[i] = states
+            for i, seg in enumerate(self.segmentation_decoder):
+                # import pdb; pdb.set_trace()
 
+                x_seg = seg(x)
+                x = torch.cat([x_seg, feature_maps[i]], dim=1)
 
-        # import pdb; pdb.set_trace()
+            seg_f = self.segmentation_head(x) 
+        
+            seg_f_detached = torch.sigmoid(seg_f.detach().clone())
+            seg_f_detached_list.append(seg_f_detached)
+
+            seg_out = F.interpolate(seg_f, size=(H, W), mode='bilinear', align_corners=True)
+            seg_out_list.append(seg_out)
+
+            delta_pose = self.delta_head(last_layer_features)
+
+            pose = pose + delta_pose
+
+            abs_poses.append(pose)
+            delta_poses.append(delta_pose)
+
         
         final_state = states
         
-        # temp = [v.detach() for k, v in states_store.items()]
-
-        last_layer_features = feature_maps[self.num_bins - 1][-1]
-        final_feature_maps = feature_maps[self.num_bins - 1][::-1]
-
-        x = last_layer_features
-
-        for i, seg in enumerate(self.segmentation_decoder):
-            x_seg = seg(x)
-            x = torch.cat([x_seg, final_feature_maps[i]], dim=1)
-        
-        # seg_f = torch.sigmoid(self.segmentation_head(x)) 
-        seg_f = self.segmentation_head(x) 
-        
-        seg_f_detached = torch.sigmoid(seg_f.detach().clone())
-        seg_out = F.interpolate(seg_f, size=(H, W), mode='bilinear', align_corners=True)
-
-        x = last_layer_features
-        hms_outs = []
-        for i, hms in enumerate(self.heatmap_decoder):
-            x = torch.cat([hms(x), final_feature_maps[i]], dim=1)
-            
-            if i >= 1:
-                inter_hms_out = F.interpolate(x[:, :self.n_joints], size=(H // 4, W // 4), mode='bilinear', align_corners=True)
-                hms_outs.append(inter_hms_out)
-            
-        hms_out = self.heatmap_head(x)
-        
-        for i in range(len(hms_outs)):
-            hms_out = hms_out + hms_outs[i] 
-        hms_out = hms_out / (len(hms_outs) + 1)
-        
-        j3d = self.joint_regressor_hms(hms_out)
-
-        # final_states = states_store[self.num_bins - 1]
+        abs_poses = torch.stack(abs_poses, dim=1)
+        delta_poses = torch.stack(delta_poses, dim=1)
+        seg_out = torch.stack(seg_out_list, dim=1)
 
         return {
-            'j3d': j3d,
-            'hms': hms_out,
+            'j3d': abs_poses,
+            'delta_j3d': delta_poses,
             'seg': seg_out,
             'seg_feature': seg_f_detached,
             'prev_states': final_state

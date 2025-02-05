@@ -88,53 +88,85 @@ class SyntheticEventStream(Dataset):
         data_batch = self.get_event_batch(idx * self.batch_size, self.batch_size)
         return data_batch
 
-    def get_annoation(self, index):
-        metadata_path = self.data_path / str(int(index)) / 'metadata.json'
-        segmentation_path = self.data_path / str(int(index)) / 'Segmentation' / 'Image0003.jpg'
-        valid_joint_path = self.data_path / str(int(index)) / 'valid_joints.json'
+    def get_annoation(self, indexes):
+        rgb_indexes = []
+        ego_j3ds = []
+        ego_j2ds = []
+        segmentation_masks = []
+        valid_joints_list = []
 
-        segmentation_mask = cv2.cvtColor(cv2.imread(str(segmentation_path)), cv2.COLOR_BGR2GRAY)   
-        human_indices = (segmentation_mask < 127)
+        for index in indexes:
+            try:
+                metadata_path = self.data_path / str(int(index)) / 'metadata.json'
+                segmentation_path = self.data_path / str(int(index)) / 'Segmentation' / 'Image0003.jpg'
+                valid_joint_path = self.data_path / str(int(index)) / 'valid_joints.json'
 
-        segmentation_mask[human_indices] = 1
-        segmentation_mask[~human_indices] = 0
-    
-        if not os.path.exists(metadata_path):
-            return {
-                'rgb_frame_index': -1,
-                'ego_to_global_space': None,
-                'valid_seg': False,
-                'ego_j3d': None, 
-                'ego_j2d': None, 
-                'segmentation_mask': segmentation_mask,
-                'valid_joints': None
-            }
+                segmentation_mask = cv2.cvtColor(cv2.imread(str(segmentation_path)), cv2.COLOR_BGR2GRAY)   
+                human_indices = (segmentation_mask < 127)
 
-        with open(metadata_path, 'r') as f:
-            metadata = json.load(f)
+                segmentation_mask[human_indices] = 1
+                segmentation_mask[~human_indices] = 0
 
-        ego_j3d = np.array(metadata['human_body']['camera']['joints_3d'])
-        ego_j2d = np.array(metadata['human_body']['camera']['joints_2d'])
+                segmentation_masks.append(segmentation_mask)
+            
+                if not os.path.exists(metadata_path):
+                    rgb_indexes.append(-1)
+                    ego_j3ds.append(None)
+                    ego_j2ds.append(None)
+                    segmentation_masks.append(segmentation_mask)
+                    valid_joints.append(None)
 
-        smpl_to_ego_joint_indices = list(self.cfg.SMPL_TO_JOINTS16.values())
-                
-        ego_j3d = ego_j3d[smpl_to_ego_joint_indices]
-        ego_j2d = ego_j2d[smpl_to_ego_joint_indices]
+                    # return {
+                    #     'rgb_frame_index': -1,
+                    #     'ego_to_global_space': None,
+                    #     'valid_seg': False,
+                    #     'ego_j3d': None, 
+                    #     'ego_j2d': None, 
+                    #     'segmentation_mask': segmentation_mask,
+                    #     'valid_joints': None
+                    # }
 
-        if valid_joint_path.exists():
-            with open(valid_joint_path, 'r') as f:
-                valid_joints = json.load(f)
-                valid_joints = list(valid_joints.values()) 
-                valid_joints = np.array(valid_joints, dtype=np.float32)
-        else:
-            valid_joints = np.ones(16, dtype=np.float32)
+                with open(metadata_path, 'r') as f:
+                    metadata = json.load(f)
+
+                ego_j3d = np.array(metadata['human_body']['camera']['joints_3d'])
+                ego_j2d = np.array(metadata['human_body']['camera']['joints_2d'])
+
+                smpl_to_ego_joint_indices = list(self.cfg.SMPL_TO_JOINTS16.values())
+                        
+                ego_j3d = ego_j3d[smpl_to_ego_joint_indices]
+                ego_j3ds.append(ego_j3d)
+
+                ego_j2d = ego_j2d[smpl_to_ego_joint_indices]
+                ego_j2ds.append(ego_j2d)
+
+
+                if valid_joint_path.exists():
+                    with open(valid_joint_path, 'r') as f:
+                        valid_joints = json.load(f)
+                        valid_joints = list(valid_joints.values()) 
+                        valid_joints = np.array(valid_joints, dtype=np.float32)
+                else:
+                    valid_joints = np.ones(16, dtype=np.float32)
+
+                valid_joints_list.append(valid_joints)
+                rgb_indexes.append(index)
+
+            except Exception as e:
+                logger.error(f'Error in getting annotation for index {index}. Error: {e}')
+                rgb_indexes.append(-1)
+                ego_j3ds.append(None)
+                ego_j2ds.append(None)
+                segmentation_masks.append(np.zeros((self.height, self.width), dtype=np.uint8))
+                valid_joints_list.append(None)
+                continue
     
         return {
-            'rgb_frame_index': index,
+            'rgb_frame_index': rgb_indexes,
             'valid_seg': True,
-            'ego_j3d': ego_j3d, 
-            'ego_j2d': ego_j2d, 
-            'segmentation_mask': segmentation_mask,
+            'ego_j3d': ego_j3ds, 
+            'ego_j2d': ego_j2ds, 
+            'segmentation_mask': segmentation_masks,
             'ego_to_global_space': None,
-            'valid_joints': valid_joints,
+            'valid_joints': valid_joints_list,
         }

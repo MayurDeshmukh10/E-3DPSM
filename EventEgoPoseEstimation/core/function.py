@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 # scaler = GradScaler()
 
-def compute_fn(model, batch, temporal_steps, prev_buffer=None, prev_key=None, batch_first=False):
+def compute_fn(model, batch, temporal_steps, initial_pose, prev_buffer=None, prev_key=None, batch_first=False):
     inps = []
     new_inps = []
     frame_index = []
@@ -152,7 +152,7 @@ def compute_fn(model, batch, temporal_steps, prev_buffer=None, prev_key=None, ba
     #     return inps, _, gt_hms, gt_j3d, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index, False
 
     # try:
-    outputs = model(inps, prev_buffer, prev_key, batch_first)
+    outputs = model(inps, initial_pose, prev_buffer, prev_key, batch_first)
     # except torch.OutOfMemoryError:
     #     return inps, _, gt_hms, gt_j3d, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index, False
 
@@ -292,7 +292,7 @@ def train(config, train_loader, model, criterions, optimizer, epoch, output_dir,
 
         # print(prof.key_averages().table(sort_by="cuda_memory_usage", row_limit=10))
         
-        pred_hms = outputs['hms']
+        # pred_hms = outputs['hms']
         pred_seg = outputs['seg']
         pred_eros = outputs['eros']
         
@@ -301,11 +301,12 @@ def train(config, train_loader, model, criterions, optimizer, epoch, output_dir,
 
         # with autocast():
         with torch.amp.autocast('cuda', enabled=True):
-            loss_hms = criterions['hms'](pred_hms, gt_hms, vis_j2d * 10)  # scale to 10
+            # loss_hms = criterions['hms'](pred_hms, gt_hms, vis_j2d * 10)  # scale to 10
             loss_seg = criterions['seg'](pred_seg, gt_seg, valid_seg)
             loss_j3d = criterions['j3d'](pred_j3d, gt_j3d, vis_j3d * 1e-2)  # scale to 1e-2
+            loss_delta_j3d = criterions['delta_j3d'](pred_j3d, gt_j3d, vis_j3d * 1e-2)  # scale to 1e-2
                 
-            loss = loss_hms + loss_j3d + loss_seg
+            # loss = loss_hms + loss_j3d + loss_seg
         
   
         pred_j2d = get_j2d_from_hms(config, pred_hms)

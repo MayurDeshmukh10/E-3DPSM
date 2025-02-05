@@ -110,66 +110,92 @@ class RealEventStream(Dataset):
         data_batch = self.get_event_batch(idx * self.batch_size, self.batch_size)
         return data_batch
 
-    def get_annoation(self, index):
-        index = int(index)
-        try:
-            anno = self.pose_list[index] # TODO: Fix this -1 one frame offset
-        except IndexError:
-            return {
-            'rgb_frame_index': -1,
-            'ego_to_global_space': None,
-            'valid_seg': False,
-            'ego_j3d': None, 
-            'ego_j2d': None, 
-            'valid_joints': None,
-            'segmentation_mask': np.zeros((self.height, self.width), dtype=np.uint8)
-        }
-        
-        ego_j3d = anno['ego_j3d']
-        ego_j2d = anno['ego_j2d']
-        global_to_board_space = anno.get('global_to_board_space', None)
+    def get_annoation(self, indexes):
+        rgb_indexes = []
+        ego_j3ds = []
+        ego_j2ds = []
+        segmentation_masks = []
+        valid_joints_list = []
+        valid_seg_list = []
+        ego_to_global_space_list = []
 
-        segmentation_path = self.data_path / 'Blender_Segmentation' /str(int(index)) / 'Segmentation' / 'Image0003.jpg'
-        
-        valid_joint_path = self.data_path / 'valid_joints' /f'{int(index)}.json'
-        
-        if valid_joint_path.exists():
-            with open(valid_joint_path, 'r') as f:
-                valid_joints = json.load(f)
-                valid_joints = list(valid_joints.values()) 
-                valid_joints = np.array(valid_joints, dtype=np.float32)
-        else:
-            valid_joints = np.zeros(16, dtype=np.float32)
-        
-        if segmentation_path.exists():
-            segmentation_mask = cv2.imread(str(segmentation_path))
-            valid_seg = True        
-        else:
-            segmentation_mask = np.zeros((self.height, self.width, 3), dtype=np.uint8)
-            valid_seg = False
+        for index in indexes:
+            index = int(index)
+            try:
+                anno = self.pose_list[index] # TODO: Fix this -1 one frame offset
+            except IndexError:
+                rgb_indexes.append(-1)
+                ego_j3ds.append(None)
+                ego_j2ds.append(None)
+                segmentation_masks.append(np.zeros((self.height, self.width), dtype=np.uint8))
+                valid_joints_list.append(None)
+                valid_seg_list.append(False)
+                ego_to_global_space_list.append(None)
+                continue
 
-        segmentation_mask = cv2.cvtColor(segmentation_mask, cv2.COLOR_BGR2GRAY)
-        
-        segmentation_mask[segmentation_mask > 127] = 1
-        
-        if not np.any(segmentation_mask):
-            valid_seg = False
+                # return {
+                # 'rgb_frame_index': -1,
+                # 'ego_to_global_space': None,
+                # 'valid_seg': False,
+                # 'ego_j3d': None, 
+                # 'ego_j2d': None, 
+                # 'valid_joints': None,
+                # 'segmentation_mask': np.zeros((self.height, self.width), dtype=np.uint8)
+                # }
+            
+            ego_j3d = anno['ego_j3d']
+            ego_j2d = anno['ego_j2d']
+            global_to_board_space = anno.get('global_to_board_space', None)
 
-        if ego_j3d is not None:
-            ego_j3d = rotate_points(ego_j3d, 'x', 180.0)
-        
-        if global_to_board_space is not None:
-            board_to_global_space = np.linalg.inv(global_to_board_space)
-            ego_to_global_space = board_to_global_space @ self.ego_to_board_space
-        else:
-            ego_to_global_space = None
+            segmentation_path = self.data_path / 'Blender_Segmentation' /str(int(index)) / 'Segmentation' / 'Image0003.jpg'
+            
+            valid_joint_path = self.data_path / 'valid_joints' /f'{int(index)}.json'
+            
+            if valid_joint_path.exists():
+                with open(valid_joint_path, 'r') as f:
+                    valid_joints = json.load(f)
+                    valid_joints = list(valid_joints.values()) 
+                    valid_joints = np.array(valid_joints, dtype=np.float32)
+            else:
+                valid_joints = np.zeros(16, dtype=np.float32)
+            
+            if segmentation_path.exists():
+                segmentation_mask = cv2.imread(str(segmentation_path))
+                valid_seg = True        
+            else:
+                segmentation_mask = np.zeros((self.height, self.width, 3), dtype=np.uint8)
+                valid_seg = False
+
+            segmentation_mask = cv2.cvtColor(segmentation_mask, cv2.COLOR_BGR2GRAY)
+            
+            segmentation_mask[segmentation_mask > 127] = 1
+            
+            if not np.any(segmentation_mask):
+                valid_seg = False
+
+            if ego_j3d is not None:
+                ego_j3d = rotate_points(ego_j3d, 'x', 180.0)
+            
+            if global_to_board_space is not None:
+                board_to_global_space = np.linalg.inv(global_to_board_space)
+                ego_to_global_space = board_to_global_space @ self.ego_to_board_space
+            else:
+                ego_to_global_space = None
+
+            ego_j3ds.append(ego_j3d)
+            ego_j2ds.append(ego_j2d)
+            rgb_indexes.append(self.frame_start_index + index)
+            segmentation_masks.append(segmentation_mask)
+            valid_joints_list.append(valid_joints)
+            valid_seg_list.append(valid_seg)
+            ego_to_global_space_list.append(ego_to_global_space)
         
         return {
-            'rgb_frame_index': self.frame_start_index + index,
-            'ego_to_global_space': ego_to_global_space,
-            'valid_seg': valid_seg,
-            'ego_j3d': ego_j3d, 
-            'ego_j2d': ego_j2d, 
-            'valid_joints': valid_joints,
-            'segmentation_mask': segmentation_mask
+            'rgb_frame_index': rgb_indexes,
+            'ego_to_global_space': ego_to_global_space_list,
+            'valid_seg': valid_seg_list,
+            'ego_j3d': ego_j3ds, 
+            'ego_j2d': ego_j2ds, 
+            'valid_joints': valid_joints_list,
+            'segmentation_mask': segmentation_masks
         }

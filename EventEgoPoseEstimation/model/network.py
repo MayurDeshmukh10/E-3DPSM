@@ -24,7 +24,7 @@ class ValueLayer(nn.Module):
             in_channels = out_channels
 
         # init with trilinear kernel
-        path = join(dirname(__file__), "quantization_layer_init", "trilinear_init.pth")
+        path = join(dirname(__file__), "quantization_layer_init", f"{num_channels}_trilinear_init.pth")
         if isfile(path):
             state_dict = torch.load(path)
             self.load_state_dict(state_dict)
@@ -66,6 +66,9 @@ class ValueLayer(nn.Module):
 
             loss.backward()
             optim.step()
+        
+        save_path = join(dirname(__file__), "quantization_layer_init", f"{num_channels}_trilinear_init.pth")
+        torch.save(self.state_dict(), save_path)
 
 
     def trilinear_kernel(self, ts, num_channels):
@@ -116,9 +119,11 @@ class QuantizationLayer(nn.Module):
 
         p = (p+1)/2  # maps polarity to 0, 1
 
-
         x_idx = x
         y_idx = W * y
+        
+        # x_idx = W * x             # Maps height (x) to row offsets
+        # y_idx = y                 # Maps width (y)
         channel_offset = W * H * C * p
         batch_offset = W * H * C * 2 * b
 
@@ -128,7 +133,7 @@ class QuantizationLayer(nn.Module):
         # Loop through bins to compute values and accumulate in voxel grid
         for i_bin in range(C):
             values = t * self.value_layer.forward(t - i_bin / (C - 1))
-            # values = t * self.value_layer.trilinear_kernel((t - i_bin / (C - 1)), 9)
+            # values = t * self.value_layer.trilinear_kernel((t - i_bin / (C - 1)), 5)
 
             # Calculate final index for this bin
             idx = idx_before_bins + W * H * i_bin
@@ -184,7 +189,7 @@ class EROS(nn.Module):
         super(EROS, self).__init__()
 
         self.quantization_layer = QuantizationLayer(
-            dim=(9, height, width),
+            dim=(inp_chn, height, width),
             mlp_layers=[1, 30, 30, 1],  # test and change if necessary
             activation=nn.LeakyReLU(negative_slope=0.1),
             batch_size=batch_size
@@ -203,9 +208,8 @@ class EROS(nn.Module):
         
         quantized_events = self.quantization_layer(events_list)
 
-        # visualize_temporal_bins(quantized_events[0], '/CT/EventEgo3Dv2/work/EventEgo3Dv2/visualizations/data_flow')
-        
-        
+        # visualize_temporal_bins(quantized_events[0], '/CT/EventEgo3Dv2/work/EventEgo3Dv2/visualizations/test/28')
+
         # quantized_events = crop_and_resize_to_resolution(quantized_events, (self.height, self.width))
         _, _, height, width = quantized_events.shape
             
@@ -217,7 +221,9 @@ class EROS(nn.Module):
         # try:
         # TODO: Visualize this after applying the confidence
         # TODO: Does it make sense to apply confidence of (1, 192, 256) to all bins (18, 192, 256)
-        out = buffer * confidence + quantized_events
+        # out = buffer * confidence + quantized_events
+        out = quantized_events
+
 
         old_min, old_max, new_min, new_max = out.min(), out.max(), 0, 1
         out = (out - old_min) * (new_max - new_min) / (old_max - old_min) + new_min
@@ -240,10 +246,12 @@ class EgoHPE(nn.Module):
 
         self.n_joints = num_joints
 
+        self.num_bins = int(input_channel / 2)
+
         # self.blaze_pose = BlazePose(config)
         self.event_3d_posenet = Event3DPoseNet(
             input_channels=posenet_input_channel,
-            num_bins=int(input_channel / 2),
+            num_bins=self.num_bins,
             num_joints=num_joints
         )
 
@@ -255,15 +263,9 @@ class EgoHPE(nn.Module):
 
         self.batch_size = batch_size
 
-        self.EROS = EROS(inp_chn=self.inp_chn, height=self.height, width=self.width, batch_size=self.batch_size)
+        self.EROS = EROS(inp_chn=self.num_bins, height=self.height, width=self.width, batch_size=self.batch_size)
         
-    def forward(self, x, prev_buffer=None, prev_key=None, batch_first=False):
-        # import pdb; pdb.set_trace()
-        # x = x.to('cpu')
-        # import pdb; pdb.set_trace()
-        # if batch_first:
-        #     import pdb; pdb.set_trace()
-        #     x = x.permute(1, 0, 2, 3, 4)
+    def forward(self, x, initial_pose, prev_buffer=None, prev_key=None, batch_first=False):
 
         buffer = prev_buffer
 
@@ -282,7 +284,7 @@ class EgoHPE(nn.Module):
 
                     
         eross = []
-        x_hmss = []
+        delta_j3ds = []
         j3ds = []
         seg_outs = []
 
@@ -298,23 +300,19 @@ class EgoHPE(nn.Module):
 
             buffers.append(buffer)
             confidences.append(confidence)
-
-            # outs = self.blaze_pose(out)
-
-            
-            outs = self.event_3d_posenet(out, prev_states)
-
-            # memory_stats = torch.cuda.memory_stats("cuda:0")
-            # print(f"Peak reserved memory: {memory_stats['reserved_bytes.all.peak'] / (1024 ** 2):.2f} MB")
+     
+            outs = self.event_3d_posenet(out, prev_states, initial_pose)
             
             prev_states = outs['prev_states']
 
             # states_store.append(outs['states_store'])
 
-            buffer = out
+            # buffer = out
 
-            x_hms = outs['hms']
+            # x_hms = outs['hms']
             j3d = outs['j3d']
+
+            delta_j3d = outs['delta_j3d']
                                     
             seg_out = outs['seg']
             seg_feature = outs['seg_feature']
@@ -322,7 +320,7 @@ class EgoHPE(nn.Module):
             key = seg_feature
             
             eross.append(buffer)
-            x_hmss.append(x_hms)
+            delta_j3ds.append(delta_j3d)
             j3ds.append(j3d)
             seg_outs.append(seg_out)
 
@@ -333,17 +331,16 @@ class EgoHPE(nn.Module):
             prev_key.copy_(key)
 
         eross = torch.cat(eross, dim=0)
-        x_hmss = torch.cat(x_hmss, dim=0)
         j3ds = torch.cat(j3ds, dim=0)
         seg_outs = torch.cat(seg_outs, dim=0)
          
         confidences = torch.cat(confidences, dim=0)
-        buffers = torch.cat(buffers, dim=0)       
+        buffers = torch.cat(buffers, dim=0)     
+        delta_j3ds = torch.cat(delta_j3ds, dim=0)  
         
         outputs = {}
         outputs['j3d'] = j3ds  
         
-        outputs['hms'] = x_hmss 
         outputs['eros'] = eross
         outputs['seg'] = seg_outs
  
@@ -351,6 +348,7 @@ class EgoHPE(nn.Module):
         outputs['buffer'] = buffers
         outputs['representation'] = representation
         outputs['prev_states'] = prev_states
+        outputs['delta_j3d'] = delta_j3ds
         # outputs['states_store'] = states_store
  
         return outputs

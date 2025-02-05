@@ -119,6 +119,6 @@ class SegmentationLoss(nn.Module):
         if weight is None:
             return self.loss(output, target)
         else:
-            weight = weight.view(-1, 1, 1, 1)
+            # weight = weight.view(-1, 1, 1, 1)
             return self.loss(output * weight, target * weight)
   

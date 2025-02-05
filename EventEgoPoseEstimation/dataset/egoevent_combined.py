@@ -26,7 +26,6 @@ class CombinedDataset(Dataset):
         generate_path_split(dataset_root, cfg)
         assert split in ['train', 'val', 'test']
 
-        import pdb; pdb.set_trace()
 
         if split == 'train':
             split_path = dataset_root / 'train.txt'
