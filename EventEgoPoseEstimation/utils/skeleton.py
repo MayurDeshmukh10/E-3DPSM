@@ -10,6 +10,7 @@ def get_sphere(position, radius=1.0, color=(0.1, 0.1, 0.7)):
     mesh_sphere.paint_uniform_color(color)
 
     # translate to position
+    # position = position.cpu().numpy()
     mesh_sphere = mesh_sphere.translate(position, relative=False)
     return mesh_sphere
 
@@ -95,7 +96,7 @@ class Skeleton:
             joints_3d = np.asarray(joints_3d)
             
         elif isinstance(joints_3d, torch.Tensor):
-            joints_3d = joints_3d.cpu().numpy()
+            joints_3d = joints_3d.detach()
         
         self.skeleton = joints_3d
         self.skeleton_to_mesh()
@@ -156,7 +157,7 @@ class Skeleton:
             j2d = np.asarray(j2d)
         
         if isinstance(j2d, torch.Tensor):
-            j2d = j2d.cpu().numpy() 
+            j2d = j2d.detach() 
 
         j2d = j2d.astype(dtype=np.int32)
 

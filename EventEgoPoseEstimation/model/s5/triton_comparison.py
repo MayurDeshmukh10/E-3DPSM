@@ -35,11 +35,11 @@ def to_triton(x: np.ndarray, device="cuda", dst_type=None):
 def to_numpy(x):
     if isinstance(x, TensorWrapper):
         # FIXME: torch_dtype_name doesn't exist
-        return x.base.cpu().numpy().astype(getattr(np, torch_dtype_name(x.dtype)))
+        return x.base.detach().astype(getattr(np, torch_dtype_name(x.dtype)))
     elif isinstance(x, torch.Tensor):
         if x.dtype is torch.bfloat16:
             return x.cpu().float().numpy()
-        return x.cpu().numpy()
+        return x.detach()
     else:
         raise ValueError(f"Not a triton-compatible tensor: {x}")
 

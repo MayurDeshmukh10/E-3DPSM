@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 # scaler = GradScaler()
 
-def compute_fn(model, batch, temporal_steps, initial_pose, prev_buffer=None, prev_key=None, batch_first=False):
+def compute_fn(model, batch, temporal_steps, initial_pose, prev_buffer=None, prev_key=None, batch_first=False, device='cuda'):
     inps = []
     new_inps = []
     frame_index = []
@@ -63,7 +63,6 @@ def compute_fn(model, batch, temporal_steps, initial_pose, prev_buffer=None, pre
             # inp = torch.from_numpy(inp)
 
             # print(f"For step {i}, shape of input is {inp.shape}")
-            
             inps_t.append(inp)
 
             gt_hms_ = data['hms'][i]
@@ -91,7 +90,7 @@ def compute_fn(model, batch, temporal_steps, initial_pose, prev_buffer=None, pre
             frame_index.append(frame_index_)
         
         max_rows = max([inp.shape[0] for inp in inps_t])
-        padding_value = torch.tensor([-10, -10, -10, -10], dtype=torch.float32).cuda()
+        padding_value = torch.tensor([-10, -10, -10, -10], dtype=torch.float32, device=device)
         # import pdb; pdb.set_trace()
         padded_inps_t = [
             torch.cat([inp, padding_value.repeat(max_rows - inp.shape[0], 1)], dim=0)
@@ -99,18 +98,8 @@ def compute_fn(model, batch, temporal_steps, initial_pose, prev_buffer=None, pre
         ]
         inps.append(torch.stack(padded_inps_t))
         
-        # inps.append(torch.cat(inps_t, dim=0).cuda())
-        # gt_hms.append(torch.cat(gt_hms_t, dim=0).cuda())
-        # gt_j3d.append(torch.cat(gt_j3d_t, dim=0).cuda())
-        # gt_seg.append(torch.cat(gt_seg_t, dim=0).cuda())
-
-        # gt_j2d.append(torch.cat(gt_j2d_t, dim=0).cuda())
-        # vis_j2d.append(torch.cat(vis_j2d_t, dim=0).cuda())
-        # vis_j3d.append(torch.cat(vis_j3d_t, dim=0).cuda())
-        # valid_j3d.append(torch.cat(valid_j3d_t, dim=0).cuda())
-
     max_rows = max([inp.shape[1] for inp in inps])
-    padding_value = torch.tensor([-10, -10, -10, -10], dtype=torch.float32).cuda()
+    padding_value = torch.tensor([-10, -10, -10, -10], dtype=torch.float32, device=device)
     temp = []
     for ip in inps:
         aa = [
@@ -121,20 +110,15 @@ def compute_fn(model, batch, temporal_steps, initial_pose, prev_buffer=None, pre
 
 
     inps = torch.stack(temp)
-    gt_hms = torch.stack(gt_hms).cuda()
-    gt_j3d = torch.stack(gt_j3d).cuda()
-    gt_seg = torch.stack(gt_seg).cuda()
-
-    gt_j2d = torch.stack(gt_j2d).cuda()
-
-    
-    vis_j2d = torch.stack(vis_j2d).cuda()
-    vis_j3d = torch.stack(vis_j3d).cuda()
-    valid_j3d = torch.stack(valid_j3d).cuda()
-    valid_seg = torch.cat([v.unsqueeze(0) for v in valid_seg]).cuda()
-    # valid_seg = torch.cat(valid_seg, dim=0).cuda()
-    frame_index = torch.cat([v.unsqueeze(0) for v in frame_index], dim=0).cuda()
-    # frame_index = torch.cat(frame_index, dim=0).cuda()
+    gt_hms = torch.stack(gt_hms)
+    gt_j3d = torch.stack(gt_j3d)
+    gt_seg = torch.stack(gt_seg)
+    gt_j2d = torch.stack(gt_j2d)
+    vis_j2d = torch.stack(vis_j2d)
+    vis_j3d = torch.stack(vis_j3d)
+    valid_j3d = torch.stack(valid_j3d)
+    valid_seg = torch.cat([v.unsqueeze(0) for v in valid_seg])
+    frame_index = torch.cat([v.unsqueeze(0) for v in frame_index], dim=0)
     
     # print("Inps shape: ", inps.shape)
     # logger.info("Batch shape: {}".format(inp.shape))
@@ -172,7 +156,7 @@ def create_image(representation):
     representation = representation[:, 8*2:(8+1)*2, :, :]
     if isinstance(representation, torch.Tensor):
         representation = representation.permute(0, 3, 2, 1)
-        representation = representation.cpu().numpy()
+        representation = representation.detach()
 
     representation = representation * 255
     representation = representation.astype(np.uint8)
@@ -487,13 +471,13 @@ def validate(config, val_loader, val_dataset, model, criterions, output_dir, tb_
             representation = outputs['representation']
             representation_image = create_image(representation)
 
-            pred_j3d = pred_j3d.detach().cpu().numpy()
+            pred_j3d = pred_j3d.detach().detach()
             preds_j2d = get_j2d_from_hms(config, pred_hms)
     
             all_preds_j3d.append(pred_j3d)
-            all_gt_j3ds.append(gt_j3d.cpu().numpy())
-            all_vis_j3d.append(valid_j3d.cpu().numpy())
-            all_frame_indices.append(frame_index.cpu().numpy())
+            all_gt_j3ds.append(gt_j3d.detach())
+            all_vis_j3d.append(valid_j3d.detach())
+            all_frame_indices.append(frame_index.detach())
 
 
             if i % config.PRINT_FREQ == 0:
@@ -555,8 +539,8 @@ def validate(config, val_loader, val_dataset, model, criterions, output_dir, tb_
     return perf_indicator
     
 def resize_transform(cfs, x, y, height, width):
-    x = x.cpu().numpy()
-    y = y.cpu().numpy()
+    x = x.detach()
+    y = y.detach()
     target_width = cfs.MODEL.IMAGE_SIZE[0]
     target_height = cfs.MODEL.IMAGE_SIZE[1]
     sx = (target_width / width)
@@ -608,12 +592,12 @@ def test(cfg, valid_loader, valid_dataset, model, tb_log_dir, writer_dict, seq_t
             # import pdb; pdb.set_trace()
             outputs = model(inps)
 
-        pred_j3ds = outputs['j3d'].cpu().numpy()
-        preds_hms = outputs['hms'].cpu().numpy()
+        pred_j3ds = outputs['j3d'].detach()
+        preds_hms = outputs['hms'].detach()
         pred_j2ds = get_j2d_from_hms(cfg, preds_hms)
         
-        gt_j3ds = torch.cat(gt_j3d, dim=0).cpu().numpy()
-        gt_hms = torch.cat(gt_hms, dim=0).cpu().numpy()
+        gt_j3ds = torch.cat(gt_j3d, dim=0).detach()
+        gt_hms = torch.cat(gt_hms, dim=0).detach()
         gt_hm_j2ds = get_j2d_from_hms(cfg, gt_hms)
 
         representation = outputs['representation']
@@ -633,7 +617,7 @@ def test(cfg, valid_loader, valid_dataset, model, tb_log_dir, writer_dict, seq_t
             inp = representation_image
             inp = inp[i]
             grid = torchvision.utils.make_grid(inp)
-            inp = grid.mul(255).clamp(0, 255).byte().permute(1, 2, 0).cpu().numpy()
+            inp = grid.mul(255).clamp(0, 255).byte().permute(1, 2, 0).detach()
            
 
             pred_hm_image = plot_heatmaps(inp, pred_hm)    

@@ -32,7 +32,8 @@ def save_batch_images(self, batch_image, tag, global_step, nrow=8, padding=2, n_
         batch_image = batch_image[:n_images][-1]
 
     grid = torchvision.utils.make_grid(batch_image, nrow, padding, True)
-    ndarr = grid.mul(255).clamp(0, 255).byte().permute(1, 2, 0).cpu().numpy()
+    ndarr = grid.mul(255).clamp(0, 255).byte().permute(1, 2, 0).detach().cpu().numpy()
+
     ndarr = ndarr.copy()
     
     # writer.add_image(tag, ndarr.transpose(2, 0, 1), global_step)
@@ -57,7 +58,7 @@ def save_batch_image_with_joints(self, batch_image, batch_joints, batch_joints_v
     batch_joints_vis = batch_joints_vis[:n_images]
 
     grid = torchvision.utils.make_grid(batch_image, nrow, padding, True)
-    ndarr = grid.mul(255).clamp(0, 255).byte().permute(1, 2, 0).cpu().numpy()
+    ndarr = grid.mul(255).clamp(0, 255).byte().permute(1, 2, 0).detach().cpu().numpy()
     ndarr = ndarr.copy()
 
     nmaps = batch_image.size(0)
@@ -152,18 +153,18 @@ def save_batch_heatmaps(self, batch_image, batch_heatmaps, tag, global_step,
                            3),
                           dtype=np.uint8)
 
-    preds, maxvals = get_max_preds(batch_heatmaps.detach().cpu().numpy())
+    preds, maxvals = get_max_preds(batch_heatmaps.detach().detach())
 
     for i in range(batch_size):
         image = batch_image[i].mul(255)\
                               .clamp(0, 255)\
                               .byte()\
                               .permute(1, 2, 0)\
-                              .cpu().numpy()
+                              .detach()
         heatmaps = batch_heatmaps[i].mul(255)\
                                     .clamp(0, 255)\
                                     .byte()\
-                                    .cpu().numpy()
+                                    .detach()
 
         resized_image = cv2.resize(image,
                                    (int(heatmap_width), int(heatmap_height)))
@@ -250,6 +251,8 @@ scene.add_node(camera_node)
 
 
 def generate_skeleton_image(gt_j3d, pred_j3d):
+    gt_j3d = gt_j3d.cpu().numpy()
+    pred_j3d = pred_j3d.cpu().numpy()
     gt_skeleton = Skeleton((0.1, 0.9, 0.1)) # Green - RGB
     pred_skeleton = Skeleton((0.9, 0.1, 0.1)) # Red - RGB
 
@@ -306,10 +309,10 @@ def save_debug_3d_joints(self, config, inp, meta, gt_j3d, pred_j3d, prefix, glob
     idx = np.random.randint(0, int(self.batch_size))
     
     if isinstance(gt_j3d, torch.Tensor):
-        gt_j3d = gt_j3d.detach().cpu().numpy()
+        gt_j3d = gt_j3d.detach().detach()
         
     if isinstance(pred_j3d, torch.Tensor):
-        pred_j3d = pred_j3d.detach().cpu().numpy()
+        pred_j3d = pred_j3d.detach().detach()
 
     # TODO: Update this to save all temporal bin predictions
     gt_j3d = gt_j3d[idx][-1] / 1000 # mm -> m
@@ -342,10 +345,10 @@ def save_debug_eros(self, config, inp, meta, eros, prefix, global_step):
  
 def plot_heatmaps(image, heatmaps):
     if isinstance(image, torch.Tensor):
-        image = image.permute(1, 2, 0).cpu().numpy()
+        image = image.permute(1, 2, 0).detach()
 
     if isinstance(heatmaps, torch.Tensor):
-        heatmaps = heatmaps.cpu().numpy()
+        heatmaps = heatmaps.detach()
     
     H, W, C = image.shape
     
@@ -453,7 +456,7 @@ def visualize_raw_events(events_tensor, output_path):
     valid_mask = ~(batch_data == -10).all(dim=1) # remove invalid events
     batch_data = batch_data[valid_mask != -10]
     
-    batch_data = batch_data.cpu().numpy()  # Move to CPU if on GPU
+    batch_data = batch_data.detach()  # Move to CPU if on GPU
     
 
     # Extract x, y, polarity (adjust indices if necessary)

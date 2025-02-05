@@ -171,7 +171,7 @@ class LNES:
     def visualize(cls, lnes: np.ndarray):
         if isinstance(lnes, torch.Tensor):
             lnes = lnes.permute(1, 2, 0)
-            lnes = lnes.cpu().numpy()   
+            lnes = lnes.detach()   
 
         lnes = lnes.copy() * 255
         lnes = lnes.astype(np.uint8)
@@ -234,7 +234,7 @@ class EventFrame:
     def visualize(cls, ef: np.ndarray):
         if isinstance(ef, torch.Tensor):
             ef = ef.permute(1, 2, 0)
-            ef = ef.cpu().numpy()   
+            ef = ef.detach()   
 
         ef = ef.copy() * 255
         ef = ef.astype(np.uint8)
@@ -420,7 +420,7 @@ class RawEvent:
     def visualize(cls, events_tensor, height, width):
         if isinstance(events_tensor, torch.Tensor):
             # ef = ef.permute(1, 2, 0)
-            events_tensor = events_tensor.cpu().numpy()
+            events_tensor = events_tensor.detach()
 
         ef = np.zeros((height, width, 3), dtype=np.uint8)
 

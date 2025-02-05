@@ -95,7 +95,7 @@ class QuantizationLayer(nn.Module):
         self.dim = dim
         self.batch_size = batch_size
 
-    def forward(self, events_list):
+    def forward(self, events_list, device):
 
         B = len(events_list)
 
@@ -108,14 +108,14 @@ class QuantizationLayer(nn.Module):
         y_values = [events[:, 1] for events in events_list]
         t_values = [events[:, 2] for events in events_list]
         p_values = [events[:, 3] for events in events_list]
-        b_values = [i * torch.ones((len(events))) for i, events in enumerate(events_list)]
+        b_values = [i * torch.ones((len(events)), device=device) for i, events in enumerate(events_list)]
         
 
         x = torch.cat(x_values, dim=0)
         y = torch.cat(y_values, dim=0)
         t = torch.cat(t_values, dim=0)
         p = torch.cat(p_values, dim=0)
-        b = torch.cat(b_values, dim=0).cuda()
+        b = torch.cat(b_values, dim=0)
 
         p = (p+1)/2  # maps polarity to 0, 1
 
@@ -199,14 +199,14 @@ class EROS(nn.Module):
         self.width = width
         self.height = height
         
-    def forward(self, buffer, events, key):
+    def forward(self, buffer, events, key, device):
         events_list = []
         for i, event_batch in enumerate(events):
             valid_mask = ~(event_batch == -10).all(dim=1) # remove invalid events
             event_batch = event_batch[valid_mask]
             events_list.append(event_batch)
         
-        quantized_events = self.quantization_layer(events_list)
+        quantized_events = self.quantization_layer(events_list, device)
 
         # visualize_temporal_bins(quantized_events[0], '/CT/EventEgo3Dv2/work/EventEgo3Dv2/visualizations/test/28')
 
@@ -265,7 +265,7 @@ class EgoHPE(nn.Module):
 
         self.EROS = EROS(inp_chn=self.num_bins, height=self.height, width=self.width, batch_size=self.batch_size)
         
-    def forward(self, x, initial_pose, prev_buffer=None, prev_key=None, batch_first=False):
+    def forward(self, x, initial_pose, prev_buffer=None, prev_key=None, batch_first=False, device='cuda'):
 
         buffer = prev_buffer
 
@@ -275,12 +275,12 @@ class EgoHPE(nn.Module):
         
         if buffer is None:
             # buffer = torch.zeros_like(x[0, :, :, :, :])
-            buffer = torch.zeros(self.batch_size, self.inp_chn, self.height, self.width).cuda()
+            buffer = torch.zeros(self.batch_size, self.inp_chn, self.height, self.width, device=device)
         
         key = prev_key
 
         if key is None:
-            key = torch.ones(self.batch_size, 1, self.hm_height, self.hm_width).cuda()
+            key = torch.ones(self.batch_size, 1, self.hm_height, self.hm_width, device=device)
 
                     
         eross = []
@@ -294,7 +294,7 @@ class EgoHPE(nn.Module):
 
         for i in range(T):
             if self.enable_eros:
-                out, confidence, buffer, representation = self.EROS(buffer, x[i], key)
+                out, confidence, buffer, representation = self.EROS(buffer, x[i], key, device)
             else:
                 out = x[i]
 

@@ -103,9 +103,9 @@ def validate(config, val_loader, val_dataset, model, criterions, output_dir, tb_
         end = time.time()
 
 
-        all_preds_j3d.append(pred_j3d.cpu().numpy())
-        all_gt_j3ds.append(gt_j3d.cpu().numpy())
-        all_vis_j3d.append(valid_j3d.cpu().numpy())
+        all_preds_j3d.append(pred_j3d.detach())
+        all_gt_j3ds.append(gt_j3d.detach())
+        all_vis_j3d.append(valid_j3d.detach())
         all_frame_indices.extend(frame_indices)
                     
         inps = []

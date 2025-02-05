@@ -236,25 +236,18 @@ def collate_variable_size(batch):
     return final_data_list, final_meta_list
 
 def create_image(representation):
-    B, C, H, W = representation.shape
-
-    representation = representation[:, 8*2:(8+1)*2, :, :]
-    if isinstance(representation, torch.Tensor):
-        representation = representation.permute(0, 3, 2, 1)
-        representation = representation.cpu().numpy()
-
-    representation = representation * 255
-    representation = representation.astype(np.uint8)
+   
+    representation = representation.to(torch.uint8)
 
     B, h, w, _ = representation.shape
-    
-    r = representation[..., :1]
-    b = representation[..., 1:]
-    g = np.zeros((B, h, w, 1), dtype=np.uint8)
 
-    representation = np.concatenate([r, g, b], axis=-1).astype(np.uint8)
+    r = representation[..., :1]  # Extract red channel
+    b = representation[..., 1:]  # Extract blue channel
+    g = torch.zeros((B, h, w, 1), dtype=torch.uint8, device=representation.device)
 
-    representation = torch.from_numpy(representation).permute(0, 3, 2, 1).to(torch.float32).cuda()
+    representation = torch.cat([r, g, b], dim=-1).to(torch.uint8)
+
+    representation = representation.permute(0, 3, 2, 1).to(torch.float32).cuda()
     # representation = representation.view(B, 3, C // 3, H, W).sum(2)
 
     # # Perform robust min-max normalization

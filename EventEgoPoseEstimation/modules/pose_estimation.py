@@ -141,6 +141,10 @@ class EventEgoPoseEstimation(LightningModule):
 
         self.automatic_optimization = False
 
+       
+        
+        # self.scaler = self.trainer.precision_plugin.scaler  # Lightning provides this if AMP is enabled
+
         # self.example_input_array = torch.Tensor(1, 1, 32768, 4)
 
 
@@ -228,32 +232,36 @@ class EventEgoPoseEstimation(LightningModule):
 
         failure_flag = torch.tensor([0.0], device=self.device)
         loss = None
+        # scaler = self.trainer.precision_plugin.scaler  # Lightning provides this if AMP is enabled
+        optimizer = self.optimizers()
+        optimizer.zero_grad(set_to_none=True) # set_to_none=True is more efficient and saves memory
 
         try:
-            inp, outputs, gt_hms, gt_j3d, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index, status = compute_fn(self.model, batch, self.temporal_steps, self.initial_pose)
+            with torch.amp.autocast('cuda', enabled=True):
+                inp, outputs, gt_hms, gt_j3d, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index, status = compute_fn(self.model, batch, self.temporal_steps, self.initial_pose, device=self.device)
 
-            valid_seg = valid_seg.expand(-1, self.temporal_bins)
-            valid_seg = valid_seg.view(self.model_batch_size, self.temporal_bins, 1, 1, 1)
+                valid_seg = valid_seg.expand(-1, self.temporal_bins)
+                valid_seg = valid_seg.view(self.model_batch_size, self.temporal_bins, 1, 1, 1)
 
-            meta = {'j3d': gt_j3d, 'j2d': gt_j2d, 'vis_j2d': vis_j2d, 'vis_j3d': vis_j3d}
-            
-            # pred_hms = outputs['hms']
-            pred_seg = outputs['seg']
-            pred_eros = outputs['eros']
-            
-            gt_j3d = gt_j3d  * 1000 # scale to mm
-            pred_j3d = outputs['j3d'] * 1000 # scale to mm
-            pred_j3d_deltas = outputs['delta_j3d'] * 1000 # scale to mm
-            initial_pose = self.initial_pose
-            initial_j3d = initial_pose.cuda() * 1000
+                meta = {'j3d': gt_j3d, 'j2d': gt_j2d, 'vis_j2d': vis_j2d, 'vis_j3d': vis_j3d}
+                
+                # pred_hms = outputs['hms']
+                pred_seg = outputs['seg']
+                pred_eros = outputs['eros']
+                
+                gt_j3d = gt_j3d  * 1000 # scale to mm
+                pred_j3d = outputs['j3d'] * 1000 # scale to mm
+                pred_j3d_deltas = outputs['delta_j3d'] * 1000 # scale to mm
+                initial_pose = self.initial_pose
+                initial_j3d = initial_pose.cuda() * 1000
 
-            all_gt_j3d = torch.cat([initial_j3d.unsqueeze(1), gt_j3d], dim=1)
+                all_gt_j3d = torch.cat([initial_j3d.unsqueeze(1), gt_j3d], dim=1)
 
-            gt_j3d_deltas = all_gt_j3d[:, 1:, :, :] - all_gt_j3d[:, :-1, :, :]
+                gt_j3d_deltas = all_gt_j3d[:, 1:, :, :] - all_gt_j3d[:, :-1, :, :]
 
             # dump_sketelon_image(test_gt_j3d, f"./visualizations/{10}_gt_j3d.png")
 
-            with torch.amp.autocast('cuda', enabled=True):
+            # with torch.amp.autocast('cuda', enabled=True):
                 loss_j3d_delta = self.criterions['delta_j3d'](pred_j3d_deltas, gt_j3d_deltas, vis_j3d * 1e-2)  # scale to 1e-2
                 loss_seg = self.criterions['seg'](pred_seg, gt_seg, valid_seg)
                 loss_j3d = self.criterions['j3d'](pred_j3d, gt_j3d, vis_j3d * 1e-2)  # scale to 1e-2
@@ -265,12 +273,13 @@ class EventEgoPoseEstimation(LightningModule):
 
             pred_seg_detached = torch.sigmoid(pred_seg.detach().clone())
 
+
             avg_acc, cnt = accuracy(gt_j3d, pred_j3d, valid_j3d)
             
-            self.j3d_delta_losses.update(loss_j3d_delta.item(), inp.size(0))
-            self.seg_losses.update(loss_seg.item(), inp.size(0))
-            self.j3d_losses.update(loss_j3d.item(), inp.size(0))
-            self.losses.update(loss.item(), inp.size(0))
+            self.j3d_delta_losses.update(loss_j3d_delta.detach(), inp.size(0))
+            self.seg_losses.update(loss_seg.detach(), inp.size(0))
+            self.j3d_losses.update(loss_j3d.detach(), inp.size(0))
+            self.losses.update(loss.detach(), inp.size(0))
             self.acc.update(avg_acc, cnt)
 
             self.batch_time.update(time.time() - end)
@@ -291,7 +300,7 @@ class EventEgoPoseEstimation(LightningModule):
                 #     'perf': 1e6,
                 #     'optimizer': optimizer.state_dict(),
                 # }, False, output_dir, tb_log_dir, filename=filename)
-        # try:
+            # try:
             if batch_idx % cfg.PRINT_FREQ == 0:
                 msg = 'Epoch: [{0}][{1}/{2}]\t' \
                     'Time {batch_time.val:.3f}s ({batch_time.avg:.3f}s)\t' \
@@ -332,6 +341,14 @@ class EventEgoPoseEstimation(LightningModule):
 
                 if batch_idx % (cfg.PRINT_FREQ * 4) == 0:
                     try:
+                        inp = inp.detach().cpu().numpy()
+                        gt_j3d = gt_j3d
+                        pred_j3d = pred_j3d
+                        gt_seg = gt_seg
+                        pred_seg_detached = pred_seg_detached
+                        pred_eros_image = pred_eros_image
+                        representation_image = representation_image
+
                         # save_debug_images(self, cfg, representation_image, meta, gt_hms, pred_hms, 'train', self.global_steps, n_images=n_images)
                         save_debug_3d_joints(self, cfg, inp, meta, gt_j3d, pred_j3d, 'train', global_step=self.global_steps)
                         save_debug_segmenation(self, cfg, inp, meta, gt_seg, pred_seg_detached, 'train', global_step=self.global_steps)
@@ -347,19 +364,15 @@ class EventEgoPoseEstimation(LightningModule):
         dist.all_reduce(failure_flag, op=dist.ReduceOp.SUM)
 
         # Manual optimization logic
-        optimizer = self.optimizers()
-        optimizer.zero_grad()
-
         if failure_flag.item() > 0:
-            # return torch.tensor([0.0], requires_grad=True).cuda()
-            # None
-            dummy_loss = torch.tensor(0.0, requires_grad=True, device=self.device)
-            self.manual_backward(dummy_loss)
+            loss = torch.tensor(0.010, requires_grad=True, device=self.device)
+            self.manual_backward(loss)
+            # Optionally: log or handle this case appropriately
         else:
             self.manual_backward(loss)
             optimizer.step()
-            
-            # Step the learning rate scheduler
+
+            # Optionally, step the learning rate scheduler:
             lr_scheduler = self.lr_schedulers()
             lr_scheduler.step()
         
@@ -370,14 +383,14 @@ class EventEgoPoseEstimation(LightningModule):
         # inp_W, inp_H = cfg.MODEL.IMAGE_SIZE  
         hm_W, hm_H = cfg.MODEL.HEATMAP_SIZE
 
-        buffer = torch.zeros(self.model_batch_size, self.input_channel, inp_H, inp_W).cuda() # change
+        buffer = torch.zeros(self.model_batch_size, self.input_channel, inp_H, inp_W, device=self.device)
 
-        key = torch.ones(self.model_batch_size, 1, hm_H, hm_W).cuda()
+        key = torch.ones(self.model_batch_size, 1, hm_H, hm_W, device=self.device)
 
         end = time.time()
 
         try:
-            inp, outputs, gt_hms, gt_j3d, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index, status = compute_fn(self.model, batch, self.temporal_steps, self.initial_pose, buffer, key, batch_first=True)
+            inp, outputs, gt_hms, gt_j3d, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index, status = compute_fn(self.model, batch, self.temporal_steps, self.initial_pose, buffer, key, batch_first=True, device=self.device)
         except RuntimeError as e:
             logger.info("Error in batch : {}".format(e))
             return
@@ -402,13 +415,13 @@ class EventEgoPoseEstimation(LightningModule):
         representation = outputs['representation']
         representation_image = create_image(representation)
 
-        pred_j3d = pred_j3d.detach().cpu().numpy()
+        pred_j3d = pred_j3d.detach()
         # preds_j2d = get_j2d_from_hms(cfg, pred_hms)
 
-        self.all_preds_j3d.append(pred_j3d)
-        self.all_gt_j3ds.append(gt_j3d.cpu().numpy())
-        self.all_vis_j3d.append(valid_j3d.cpu().numpy())
-        self.all_frame_indices.append(frame_index.cpu().numpy())
+        self.all_preds_j3d.append(pred_j3d.detach())
+        self.all_gt_j3ds.append(gt_j3d.detach())
+        self.all_vis_j3d.append(valid_j3d.detach())
+        self.all_frame_indices.append(frame_index.detach())
 
         if batch_idx % cfg.PRINT_FREQ == 0:
             msg = 'Test: [{0}/{1}]\t' \
@@ -479,28 +492,24 @@ def test_and_generate_vis(cfg, model, test_dataset, tb_log_dir, global_steps):
         data, meta = test_dataset[i]
 
         inp = data['x']
-        # max_len, feature_dim = inp.shape
-        # indices = torch.arange(0, 1, dtype=torch.float32).view(-1, 1, 1).expand(-1, max_len, 1)
-        # inp = torch.cat([inp, indices.squeeze(0)], dim=1).cuda()
 
         gt_j3d_ = data['j3d']
-        # gt_hms = data['hms']
 
         inps.append(inp[None, None, ...])
         gt_j3d.append(gt_j3d_[None, ...])
         gt_hms.append(data['hms'][None, ...])
 
         inps = torch.cat(inps, dim=0).cuda()
+        
         with torch.no_grad():
-            # import pdb; pdb.set_trace()
             outputs = model(inps)
 
-        pred_j3ds = outputs['j3d'].cpu().numpy()
-        preds_hms = outputs['hms'].cpu().numpy()
+        pred_j3ds = outputs['j3d'].detach()
+        preds_hms = outputs['hms'].detach()
         pred_j2ds = get_j2d_from_hms(cfg, preds_hms)
         
-        gt_j3ds = torch.cat(gt_j3d, dim=0).cpu().numpy()
-        gt_hms = torch.cat(gt_hms, dim=0).cpu().numpy()
+        gt_j3ds = torch.cat(gt_j3d, dim=0).detach()
+        gt_hms = torch.cat(gt_hms, dim=0).detach()
         gt_hm_j2ds = get_j2d_from_hms(cfg, gt_hms)
 
         representation = outputs['representation']
@@ -520,7 +529,7 @@ def test_and_generate_vis(cfg, model, test_dataset, tb_log_dir, global_steps):
             inp = representation_image
             inp = inp[i]
             grid = torchvision.utils.make_grid(inp)
-            inp = grid.mul(255).clamp(0, 255).byte().permute(1, 2, 0).cpu().numpy()
+            inp = grid.mul(255).clamp(0, 255).byte().permute(1, 2, 0).detach()
            
 
             pred_hm_image = plot_heatmaps(inp, pred_hm)    
