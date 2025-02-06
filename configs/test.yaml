@@ -9,7 +9,7 @@ model:
       input_channel: 20 #36 (works well in vis) #18 #12 #18
       posenet_input_channel: 2
       image_size: [256, 192]
-      batch_size: 6 #16 # 9 # individual batch size
+      batch_size: 2 #16 # 9 # individual batch size
       #heatmap_size: [config.MODEL.IMAGE_SIZE[0] // config.MODEL.HEAT_MAP_SCALE, config.MODEL.IMAGE_SIZE[1] // config.MODEL.HEAT_MAP_SCALE] TODO: fix this
     
     # dataset_cfg:
@@ -27,22 +27,22 @@ model:
     #   event_batch_size: 4096
     lr: 0.01
     lr_decay_epochs:
-      - 6 #10
+      - 5 #10
       - 7 #15
     dataset_type:  synthetic # real
     training_type: pretrain #finetune #pretrain # finetune
     temporal_steps: 1
-    batch_size: 24
+    batch_size: 2
     workers: 16
 
 
 # ckpt_path: /CT/EventEgo3Dv2/work/egoposeformer/results/pose3d/lightning_logs/version_68/checkpoints/epoch=11.ckpt
 trainer:
   accelerator: gpu
-  max_epochs: 5
+  max_epochs: 20
   check_val_every_n_epoch: 1
-  devices: 4
-  num_nodes: 2
+  devices: 1
+  # num_nodes: 2
   benchmark: false
   precision: 16-mixed
   strategy: ddp_find_unused_parameters_true
@@ -74,4 +74,6 @@ trainer:
     - class_path: pytorch_lightning.loggers.TensorBoardLogger
       init_args:
         save_dir: ./results/
-        name: delta_prediction_gpu20_autoregressive # Experiment name
+        name: test # Experiment name
+
+

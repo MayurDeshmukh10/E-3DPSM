@@ -265,7 +265,7 @@ class EgoHPE(nn.Module):
 
         self.EROS = EROS(inp_chn=self.num_bins, height=self.height, width=self.width, batch_size=self.batch_size)
         
-    def forward(self, x, initial_pose, prev_buffer=None, prev_key=None, batch_first=False, device='cuda'):
+    def forward(self, x, prev_buffer=None, prev_key=None, batch_first=False, device='cuda'):
 
         buffer = prev_buffer
 
@@ -301,7 +301,7 @@ class EgoHPE(nn.Module):
             buffers.append(buffer)
             confidences.append(confidence)
      
-            outs = self.event_3d_posenet(out, prev_states, initial_pose)
+            outs = self.event_3d_posenet(out, prev_states)
             
             prev_states = outs['prev_states']
 

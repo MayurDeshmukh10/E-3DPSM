@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 # scaler = GradScaler()
 
-def compute_fn(model, batch, temporal_steps, initial_pose, prev_buffer=None, prev_key=None, batch_first=False, device='cuda'):
+def compute_fn(model, batch, temporal_steps, prev_buffer=None, prev_key=None, batch_first=False, device='cuda'):
     inps = []
     new_inps = []
     frame_index = []
@@ -136,7 +136,7 @@ def compute_fn(model, batch, temporal_steps, initial_pose, prev_buffer=None, pre
     #     return inps, _, gt_hms, gt_j3d, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index, False
 
     # try:
-    outputs = model(inps, initial_pose, prev_buffer, prev_key, batch_first)
+    outputs = model(inps, prev_buffer, prev_key, batch_first)
     # except torch.OutOfMemoryError:
     #     return inps, _, gt_hms, gt_j3d, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index, False
 
