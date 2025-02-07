@@ -96,7 +96,7 @@ class EventEgoPoseEstimation(LightningModule):
 
         self.train_dataset: Optional[Dataset] = None
         self.eval_dataset: Optional[Dataset] = None
-        self.test_dataset_e: Optional[Dataset] = None
+        self.test_dataset: Optional[Dataset] = None
 
         self.criterions = {
             'j3d': J3dMSELoss(
@@ -177,27 +177,33 @@ class EventEgoPoseEstimation(LightningModule):
             self.eval_dataset = EgoEvent(cfg, temporal_bins=self.temporal_bins, split='test')
 
 
-        if self.training_type == 'pretrain':
-            pretraining = True
-            logger.info("Training type: Pretrain")
-            self.train_dataset = TemoralWrapper(pretrain_dataset, cfg.DATASET.TEMPORAL_STEPS, augment=True)
-        elif self.training_type == 'finetune':
-            pretraining = False
-            logger.info("Training type: Finetune")
-            self.train_dataset = TemoralWrapper(finetune_dataset, cfg.DATASET.TEMPORAL_STEPS, augment=False)
-        else:
-            assert False, f"Invalid training type: {self.training_type}"
+            if self.training_type == 'pretrain':
+                pretraining = True
+                logger.info("Training type: Pretrain")
+                self.train_dataset = TemoralWrapper(pretrain_dataset, cfg.DATASET.TEMPORAL_STEPS, augment=True)
+            elif self.training_type == 'finetune':
+                pretraining = False
+                logger.info("Training type: Finetune")
+                self.train_dataset = TemoralWrapper(finetune_dataset, cfg.DATASET.TEMPORAL_STEPS, augment=False)
+            else:
+                assert False, f"Invalid training type: {self.training_type}"
 
         # TODO: Fix this
         if stage == "test" or stage == "predict":
-            # cfg.DATASET.SYN_ROOT = cfg.DATASET.SYN_TEST_ROOT 
-            # cfg.DATASET.TYPE = 'Synthetic'
+            if self.training_type == 'pretrain':
+                cfg.DATASET.SYN_ROOT = cfg.DATASET.SYN_TEST_ROOT 
+                cfg.DATASET.TYPE = 'Synthetic'
+                cfg.DATASET.BG_AUG = False
+                cfg.DATASET.TRAIN_TEST_SPLIT = 0
+            elif self.training_type == 'finetune':
+                cfg.DATASET.TYPE = 'Real'
+                cfg.DATASET.BG_AUG = False
+            else:
+                assert False, f"Invalid training type: {self.training_type}"
+            # cfg.DATASET.TYPE = 'Real'
             # cfg.DATASET.BG_AUG = False
-            # cfg.DATASET.TRAIN_TEST_SPLIT = 0
-            cfg.DATASET.TYPE = 'Real'
-            cfg.DATASET.BG_AUG = False
-            self.test_dataset_e = EgoEvent(cfg, temporal_bins=self.temporal_bins, split='test')
-            self.eval_dataset = TemoralWrapper(self.test_dataset_e, cfg.DATASET.TEMPORAL_STEPS, augment=False)
+            self.test_dataset = EgoEvent(cfg, temporal_bins=self.temporal_bins, split='test')
+            # self.eval_dataset = TemoralWrapper(self.test_dataset_e, cfg.DATASET.TEMPORAL_STEPS, augment=False)
 
     def train_dataloader(self):
         dataloader = torch.utils.data.DataLoader(
@@ -225,7 +231,16 @@ class EventEgoPoseEstimation(LightningModule):
         return dataloader
 
     def test_dataloader(self):
-        return self.val_dataloader()
+        dataloader =  torch.utils.data.DataLoader(
+            self.test_dataset,
+            batch_size=self.batch_size,
+            collate_fn=collate_variable_size,
+            num_workers=self.workers,
+            pin_memory=True,
+            drop_last=True
+        )
+        self.val_dataloader_len = len(dataloader)
+        return dataloader
 
     def training_step(self, batch, batch_idx):
         end = time.time()
@@ -390,39 +405,40 @@ class EventEgoPoseEstimation(LightningModule):
 
         end = time.time()
 
-        try:
-            inp, outputs, gt_hms, gt_j3d, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index, status = compute_fn(self.model, batch, self.temporal_steps, buffer, key, batch_first=True, device=self.device)
-        except RuntimeError as e:
-            logger.info("Error in batch : {}".format(e))
-            return
-        
-        # TODO: Add batch skipped and add these in the iteration again
-        # if status is False:
-        #     return
-        
-        meta = {'j3d': gt_j3d, 'j2d': gt_j2d, 'vis_j2d': vis_j2d, 'vis_j3d': vis_j3d}
+        with torch.amp.autocast('cuda', enabled=True):
 
-        # pred_hms = outputs['hms']            
-        pred_j3d = outputs['j3d'] * 1000 # scale to mm        
-        gt_j3d = gt_j3d * 1000 # scale to mm
-        
-        avg_acc, cnt = accuracy(gt_j3d, pred_j3d, valid_j3d)
-        self.acc_j3d_val.update(avg_acc, cnt)
-        
-        # measure elapsed time
-        self.batch_time.update(time.time() - end)
-        end = time.time()
+            try:
+                inp, outputs, gt_hms, gt_j3d, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index, status = compute_fn(self.model, batch, self.temporal_steps, buffer, key, batch_first=True, device=self.device)
+            except RuntimeError as e:
+                logger.info("Error in batch : {}".format(e))
+                return
 
-        representation = outputs['representation']
-        representation_image = create_image(representation)
+            
+            meta = {'j3d': gt_j3d, 'j2d': gt_j2d, 'vis_j2d': vis_j2d, 'vis_j3d': vis_j3d}
 
-        pred_j3d = pred_j3d.detach()
-        # preds_j2d = get_j2d_from_hms(cfg, pred_hms)
+            pred_j3d = outputs['j3d'] * 1000 # scale to mm        
+            gt_j3d = gt_j3d * 1000 # scale to mm
 
-        self.all_preds_j3d.append(pred_j3d.detach())
-        self.all_gt_j3ds.append(gt_j3d.detach())
-        self.all_vis_j3d.append(valid_j3d.detach())
-        self.all_frame_indices.append(frame_index.detach())
+            # pred_j3d = pred_j3d[:, -1, :, :]
+            # gt_j3d = gt_j3d[:, -1, :, :]
+
+            
+            avg_acc, cnt = accuracy(gt_j3d, pred_j3d, valid_j3d)
+            self.acc_j3d_val.update(avg_acc, cnt)
+            
+            # measure elapsed time
+            self.batch_time.update(time.time() - end)
+            end = time.time()
+
+            representation = outputs['representation']
+            representation_image = create_image(representation)
+
+            pred_j3d = pred_j3d.detach()
+
+            self.all_preds_j3d.append(pred_j3d.detach())
+            self.all_gt_j3ds.append(gt_j3d.detach())
+            self.all_vis_j3d.append(valid_j3d.detach())
+            self.all_frame_indices.append(frame_index.detach())
 
         if batch_idx % cfg.PRINT_FREQ == 0:
             msg = 'Test: [{0}/{1}]\t' \
@@ -436,13 +452,13 @@ class EventEgoPoseEstimation(LightningModule):
         elif prefix == "test" and vis == True:
             global_steps=batch_idx
             tb_log_dir = self.logger.log_dir
-            test_and_generate_vis(cfg, self.model, self.test_dataset_e, tb_log_dir, global_steps)
+            test_and_generate_vis(cfg, self.model, self.test_dataset, tb_log_dir, global_steps)
 
     def validation_step(self, batch, batch_idx):
         return self.eval_step(batch, batch_idx, "val")
 
     def test_step(self, batch, batch_idx):
-        return self.eval_step(batch, batch_idx, "test", vis=True)
+        return self.eval_step(batch, batch_idx, "test", vis=False)
 
     def configure_optimizers(self):
         optimizer = None
