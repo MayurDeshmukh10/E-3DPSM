@@ -404,51 +404,51 @@ class EventEgoPoseEstimation(LightningModule):
         key = torch.ones(self.model_batch_size, 1, hm_H, hm_W, device=self.device)
 
         end = time.time()
-
-        with torch.amp.autocast('cuda', enabled=True):
-
-            try:
-                inp, outputs, gt_hms, gt_j3d, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index, status = compute_fn(self.model, batch, self.temporal_steps, buffer, key, batch_first=True, device=self.device)
-            except RuntimeError as e:
-                logger.info("Error in batch : {}".format(e))
-                return
-
-            
-            meta = {'j3d': gt_j3d, 'j2d': gt_j2d, 'vis_j2d': vis_j2d, 'vis_j3d': vis_j3d}
-
-            pred_j3d = outputs['j3d'] * 1000 # scale to mm        
-            gt_j3d = gt_j3d * 1000 # scale to mm
-
-            # pred_j3d = pred_j3d[:, -1, :, :]
-            # gt_j3d = gt_j3d[:, -1, :, :]
-
-            
-            avg_acc, cnt = accuracy(gt_j3d, pred_j3d, valid_j3d)
-            self.acc_j3d_val.update(avg_acc, cnt)
-            
-            # measure elapsed time
-            self.batch_time.update(time.time() - end)
-            end = time.time()
-
-            representation = outputs['representation']
-            representation_image = create_image(representation)
-
-            pred_j3d = pred_j3d.detach()
-
-            self.all_preds_j3d.append(pred_j3d.detach())
-            self.all_gt_j3ds.append(gt_j3d.detach())
-            self.all_vis_j3d.append(valid_j3d.detach())
-            self.all_frame_indices.append(frame_index.detach())
-
-        if batch_idx % cfg.PRINT_FREQ == 0:
-            msg = 'Test: [{0}/{1}]\t' \
-                'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t' \
-                'MPJPE {acc.val:.4f} ({acc.avg:.4f})\t'.format(
-                    batch_idx, self.val_dataloader_len, batch_time=self.batch_time,
-                    acc=self.acc_j3d_val)
-            logger.info(msg)
-
         
+        if vis == False:
+            with torch.amp.autocast('cuda', enabled=True):
+
+                try:
+                    inp, outputs, gt_hms, gt_j3d, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index, status = compute_fn(self.model, batch, self.temporal_steps, buffer, key, batch_first=True, device=self.device)
+                except RuntimeError as e:
+                    logger.info("Error in batch : {}".format(e))
+                    return
+
+                
+                meta = {'j3d': gt_j3d, 'j2d': gt_j2d, 'vis_j2d': vis_j2d, 'vis_j3d': vis_j3d}
+
+                pred_j3d = outputs['j3d'] * 1000 # scale to mm        
+                gt_j3d = gt_j3d * 1000 # scale to mm
+
+                # pred_j3d = pred_j3d[:, -1, :, :]
+                # gt_j3d = gt_j3d[:, -1, :, :]
+
+                
+                avg_acc, cnt = accuracy(gt_j3d, pred_j3d, valid_j3d)
+                self.acc_j3d_val.update(avg_acc, cnt)
+                
+                # measure elapsed time
+                self.batch_time.update(time.time() - end)
+                end = time.time()
+
+                # representation = outputs['representation']
+                # representation_image = create_image(representation)
+
+                pred_j3d = pred_j3d.detach()
+
+                self.all_preds_j3d.append(pred_j3d.detach())
+                self.all_gt_j3ds.append(gt_j3d.detach())
+                self.all_vis_j3d.append(valid_j3d.detach())
+                self.all_frame_indices.append(frame_index.detach())
+
+            if batch_idx % cfg.PRINT_FREQ == 0:
+                msg = 'Test: [{0}/{1}]\t' \
+                    'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t' \
+                    'MPJPE {acc.val:.4f} ({acc.avg:.4f})\t'.format(
+                        batch_idx, self.val_dataloader_len, batch_time=self.batch_time,
+                        acc=self.acc_j3d_val)
+                logger.info(msg)
+
         elif prefix == "test" and vis == True:
             global_steps=batch_idx
             tb_log_dir = self.logger.log_dir
@@ -522,12 +522,12 @@ def test_and_generate_vis(cfg, model, test_dataset, tb_log_dir, global_steps):
             outputs = model(inps)
 
         pred_j3ds = outputs['j3d'].detach()
-        preds_hms = outputs['hms'].detach()
-        pred_j2ds = get_j2d_from_hms(cfg, preds_hms)
+        # preds_hms = outputs['hms'].detach()
+        # pred_j2ds = get_j2d_from_hms(cfg, preds_hms)
         
         gt_j3ds = torch.cat(gt_j3d, dim=0).detach()
-        gt_hms = torch.cat(gt_hms, dim=0).detach()
-        gt_hm_j2ds = get_j2d_from_hms(cfg, gt_hms)
+        # gt_hms = torch.cat(gt_hms, dim=0).detach()
+        # gt_hm_j2ds = get_j2d_from_hms(cfg, gt_hms)
 
         representation = outputs['representation']
         representation_image = create_image(representation)
@@ -537,11 +537,11 @@ def test_and_generate_vis(cfg, model, test_dataset, tb_log_dir, global_steps):
         for i in range(T):
             gt_j3d = gt_j3ds[i]
             gt_hm = gt_hms[i]
-            gt_hm_j2d = gt_hm_j2ds[i]
+            # gt_hm_j2d = gt_hm_j2ds[i]
             
             pred_j3d = pred_j3ds[i]
-            pred_j2d = pred_j2ds[i]
-            pred_hm = preds_hms[i]
+            # pred_j2d = pred_j2ds[i]
+            # pred_hm = preds_hms[i]
 
             inp = representation_image
             inp = inp[i]
@@ -549,13 +549,13 @@ def test_and_generate_vis(cfg, model, test_dataset, tb_log_dir, global_steps):
             inp = grid.mul(255).clamp(0, 255).byte().permute(1, 2, 0).detach()
            
 
-            pred_hm_image = plot_heatmaps(inp, pred_hm)    
-            gt_hm_image = plot_heatmaps(inp, gt_hm)
+            # pred_hm_image = plot_heatmaps(inp, pred_hm)    
+            # gt_hm_image = plot_heatmaps(inp, gt_hm)
 
             inp = inp.astype(np.uint8)
 
-            inp_w_gt_hm_j2d = Skeleton.draw_2d_skeleton(inp, gt_hm_j2d, lines=True)
-            inp = Skeleton.draw_2d_skeleton(inp, pred_j2d, lines=True)
+            # inp_w_gt_hm_j2d = Skeleton.draw_2d_skeleton(inp, gt_hm_j2d, lines=True)
+            # inp = Skeleton.draw_2d_skeleton(inp, pred_j2d, lines=True)
                     
             color = generate_skeleton_image(gt_j3d, pred_j3d)
             color = color[..., ::-1]

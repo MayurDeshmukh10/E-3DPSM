@@ -9,7 +9,7 @@ model:
       input_channel: 20 #36 (works well in vis) #18 #12 #18
       posenet_input_channel: 2
       image_size: [256, 192]
-      batch_size: 1 #16 # 9 # individual batch size
+      batch_size: 16 #16 # 9 # individual batch size
       #heatmap_size: [config.MODEL.IMAGE_SIZE[0] // config.MODEL.HEAT_MAP_SCALE, config.MODEL.IMAGE_SIZE[1] // config.MODEL.HEAT_MAP_SCALE] TODO: fix this
     
     # dataset_cfg:
@@ -32,11 +32,9 @@ model:
     dataset_type:  synthetic # real
     training_type: pretrain #finetune #pretrain # finetune
     temporal_steps: 1
-    batch_size: 1
-    workers: 12
+    batch_size: 16
+    workers: 16
 
-
-# ckpt_path: /CT/EventEgo3Dv2/work/EventEgo3Dv2/results/delta_prediction_gpu20_fixed_optimized/version_0/checkpoints/epoch=0.ckpt
 
 ckpt_path: /CT/EventEgo3Dv2/work/EventEgo3Dv2/results/delta_prediction_gpu20_autoregressive/version_0/checkpoints/last.ckpt
 
