@@ -343,8 +343,17 @@ class Joints3DDataset(Dataset):
         all_vis_j3d = all_vis_j3d[:min_length]
         errors, errors_pa = compute_3d_errors_batch(all_gt_j3ds, all_preds_j3d, all_vis_j3d)
         
-        MPJPE = np.mean(errors) 
+        MPJPE = np.mean(errors)
         PAMPJPE = np.mean(errors_pa)
+
+        # TODO: Remove try-except block if this works.
+        try:
+            MPJPE_std = np.std(errors)
+            PAMPJPE_std = np.std(errors_pa)
+        except Exception as e:
+            print(f"Error: {e}")
+            MPJPE_std = 0
+            PAMPJPE_std = 0
 
         name_values = []
 
@@ -368,10 +377,12 @@ class Joints3DDataset(Dataset):
         for i, joint_name in enumerate(heatmap_sequence):
             name_values.append((f'{joint_name}_MPJPE', errors[i]))
         name_values.append(('MPJPE', MPJPE))
+        name_values.append(('MPJPE_std', MPJPE_std))
 
         for i, joint_name in enumerate(heatmap_sequence):
             name_values.append((f'{joint_name}_PAMPJPE', errors_pa[i]))
         name_values.append(('PAMPJPE', PAMPJPE))
+        name_values.append(('PAMPJPE_std', PAMPJPE_std))
 
         name_values = OrderedDict(name_values)
 
