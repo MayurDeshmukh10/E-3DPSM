@@ -251,130 +251,130 @@ class EventEgoPoseEstimation(LightningModule):
         optimizer = self.optimizers()
         optimizer.zero_grad(set_to_none=True) # set_to_none=True is more efficient and saves memory
 
-        # try:
-        with torch.amp.autocast('cuda', enabled=True):
-            inp, outputs, gt_hms, gt_j3d, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index, status = compute_fn(self.model, batch, self.temporal_steps, device=self.device)
+        try:
+            with torch.amp.autocast('cuda', enabled=True):
+                inp, outputs, gt_hms, gt_j3d, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index, status = compute_fn(self.model, batch, self.temporal_steps, device=self.device)
 
-            valid_seg = valid_seg.expand(-1, self.temporal_bins)
-            valid_seg = valid_seg.view(self.model_batch_size, self.temporal_bins, 1, 1, 1)
+                valid_seg = valid_seg.expand(-1, self.temporal_bins)
+                valid_seg = valid_seg.view(self.model_batch_size, self.temporal_bins, 1, 1, 1)
 
-            meta = {'j3d': gt_j3d, 'j2d': gt_j2d, 'vis_j2d': vis_j2d, 'vis_j3d': vis_j3d}
-            
-            # pred_hms = outputs['hms']
-            pred_seg = outputs['seg']
-            pred_eros = outputs['eros']
-            
-            gt_j3d = gt_j3d  * 1000 # scale to mm
-            pred_j3d = outputs['j3d'] * 1000 # scale to mm
-            pred_j3d_deltas = outputs['delta_j3d'] * 1000 # scale to mm
-            # initial_pose = self.initial_pose
-            # initial_j3d = initial_pose.cuda() * 1000
-
-            # all_gt_j3d = torch.cat([initial_j3d.unsqueeze(1), gt_j3d], dim=1)
-            all_gt_j3d = gt_j3d
-
-            gt_j3d_deltas = all_gt_j3d[:, 1:, :, :] - all_gt_j3d[:, :-1, :, :]
-
-        # dump_sketelon_image(test_gt_j3d, f"./visualizations/{10}_gt_j3d.png")
-
-        # with torch.amp.autocast('cuda', enabled=True):
-            loss_j3d_delta = self.criterions['delta_j3d'](pred_j3d_deltas, gt_j3d_deltas, vis_j3d * 1e-2)  # scale to 1e-2
-            loss_seg = self.criterions['seg'](pred_seg, gt_seg, valid_seg)
-            loss_j3d = self.criterions['j3d'](pred_j3d, gt_j3d, vis_j3d * 1e-2)  # scale to 1e-2
+                meta = {'j3d': gt_j3d, 'j2d': gt_j2d, 'vis_j2d': vis_j2d, 'vis_j3d': vis_j3d}
                 
-            loss = loss_j3d_delta + loss_j3d + loss_seg
+                # pred_hms = outputs['hms']
+                pred_seg = outputs['seg']
+                pred_eros = outputs['eros']
+                
+                gt_j3d = gt_j3d  * 1000 # scale to mm
+                pred_j3d = outputs['j3d'] * 1000 # scale to mm
+                pred_j3d_deltas = outputs['delta_j3d'] * 1000 # scale to mm
+                # initial_pose = self.initial_pose
+                # initial_j3d = initial_pose.cuda() * 1000
+
+                # all_gt_j3d = torch.cat([initial_j3d.unsqueeze(1), gt_j3d], dim=1)
+                all_gt_j3d = gt_j3d
+
+                gt_j3d_deltas = all_gt_j3d[:, 1:, :, :] - all_gt_j3d[:, :-1, :, :]
+
+            # dump_sketelon_image(test_gt_j3d, f"./visualizations/{10}_gt_j3d.png")
+
+            # with torch.amp.autocast('cuda', enabled=True):
+                loss_j3d_delta = self.criterions['delta_j3d'](pred_j3d_deltas, gt_j3d_deltas, vis_j3d * 1e-2)  # scale to 1e-2
+                loss_seg = self.criterions['seg'](pred_seg, gt_seg, valid_seg)
+                loss_j3d = self.criterions['j3d'](pred_j3d, gt_j3d, vis_j3d * 1e-2)  # scale to 1e-2
+                    
+                loss = loss_j3d_delta + loss_j3d + loss_seg
 
 
-        # pred_j2d = get_j2d_from_hms(cfg, pred_hms)
+            # pred_j2d = get_j2d_from_hms(cfg, pred_hms)
 
-        pred_seg_detached = torch.sigmoid(pred_seg.detach().clone())
+            pred_seg_detached = torch.sigmoid(pred_seg.detach().clone())
 
 
-        avg_acc, cnt = accuracy(gt_j3d, pred_j3d, valid_j3d)
-        
-        self.j3d_delta_losses.update(loss_j3d_delta.detach(), inp.size(0))
-        self.seg_losses.update(loss_seg.detach(), inp.size(0))
-        self.j3d_losses.update(loss_j3d.detach(), inp.size(0))
-        self.losses.update(loss.detach(), inp.size(0))
-        self.acc.update(avg_acc, cnt)
+            avg_acc, cnt = accuracy(gt_j3d, pred_j3d, valid_j3d)
+            
+            self.j3d_delta_losses.update(loss_j3d_delta.detach(), inp.size(0))
+            self.seg_losses.update(loss_seg.detach(), inp.size(0))
+            self.j3d_losses.update(loss_j3d.detach(), inp.size(0))
+            self.losses.update(loss.detach(), inp.size(0))
+            self.acc.update(avg_acc, cnt)
 
-        self.batch_time.update(time.time() - end)
-        end = time.time()
+            self.batch_time.update(time.time() - end)
+            end = time.time()
 
-        representation = outputs['representation']
-        representation_image = create_image(representation)
-        pred_eros_image = create_image(pred_eros.detach())
+            representation = outputs['representation']
+            representation_image = create_image(representation)
+            pred_eros_image = create_image(pred_eros.detach())
 
-            # TODO: save checkpoint - fix this later
-            # if batch_idx % 5000 == 0:
-            #     filename = f'{i}_it_checkpoint.pth'
-            #     save_checkpoint(self.current_epoch + 1, {
-            #     'epoch': self.current_epoch + 1,
-            #     'model': cfg.MODEL.NAME,
-            #     'state_dict': model.state_dict(),
-            #     'best_state_dict': model.module.state_dict(),
-            #     'perf': 1e6,
-            #     'optimizer': optimizer.state_dict(),
-            # }, False, output_dir, tb_log_dir, filename=filename)
-            # try:
-        if batch_idx % cfg.PRINT_FREQ == 0:
-            msg = 'Epoch: [{0}][{1}/{2}]\t' \
-                'Time {batch_time.val:.3f}s ({batch_time.avg:.3f}s)\t' \
-                'Speed {speed:.1f} samples/s\t' \
-                'Data {data_time.val:.3f}s ({data_time.avg:.3f}s)\t' \
-                'Delta_J3D_Loss {hms_loss.val:.5f} ({hms_loss.avg:.5f})\t' \
-                'J3D_Loss {j3d_loss.val:.5f} ({j3d_loss.avg:.5f})\t' \
-                'SEG_Loss {seg_loss.val:.5f} ({seg_loss.avg:.5f})\t' \
-                'Loss {loss.val:.5f} ({loss.avg:.5f})\t' \
-                'MPJPE {acc.val:.3f} ({acc.avg:.3f})'.format(
-                    self.current_epoch, batch_idx, self.train_dataloader_len, batch_time=self.batch_time,
-                    speed=inp.size(0)/self.batch_time.val,
-                    data_time=self.data_time, 
-                    loss=self.losses, 
-                    j3d_loss=self.j3d_losses, 
-                    hms_loss=self.j3d_delta_losses,
-                    seg_loss=self.seg_losses,
-                    acc=self.acc
-                    )
-            logger.info(msg)
+                # TODO: save checkpoint - fix this later
+                # if batch_idx % 5000 == 0:
+                #     filename = f'{i}_it_checkpoint.pth'
+                #     save_checkpoint(self.current_epoch + 1, {
+                #     'epoch': self.current_epoch + 1,
+                #     'model': cfg.MODEL.NAME,
+                #     'state_dict': model.state_dict(),
+                #     'best_state_dict': model.module.state_dict(),
+                #     'perf': 1e6,
+                #     'optimizer': optimizer.state_dict(),
+                # }, False, output_dir, tb_log_dir, filename=filename)
+                # try:
+            if batch_idx % cfg.PRINT_FREQ == 0:
+                msg = 'Epoch: [{0}][{1}/{2}]\t' \
+                    'Time {batch_time.val:.3f}s ({batch_time.avg:.3f}s)\t' \
+                    'Speed {speed:.1f} samples/s\t' \
+                    'Data {data_time.val:.3f}s ({data_time.avg:.3f}s)\t' \
+                    'Delta_J3D_Loss {hms_loss.val:.5f} ({hms_loss.avg:.5f})\t' \
+                    'J3D_Loss {j3d_loss.val:.5f} ({j3d_loss.avg:.5f})\t' \
+                    'SEG_Loss {seg_loss.val:.5f} ({seg_loss.avg:.5f})\t' \
+                    'Loss {loss.val:.5f} ({loss.avg:.5f})\t' \
+                    'MPJPE {acc.val:.3f} ({acc.avg:.3f})'.format(
+                        self.current_epoch, batch_idx, self.train_dataloader_len, batch_time=self.batch_time,
+                        speed=inp.size(0)/self.batch_time.val,
+                        data_time=self.data_time, 
+                        loss=self.losses, 
+                        j3d_loss=self.j3d_losses, 
+                        hms_loss=self.j3d_delta_losses,
+                        seg_loss=self.seg_losses,
+                        acc=self.acc
+                        )
+                logger.info(msg)
 
-            memory_stats = torch.cuda.memory_stats("cuda:0")
-        # logger.info("Batch shape: {}".format(inp.shape))
-            # logger.info(f"Current allocated memory: {memory_stats['allocated_bytes.all.current'] / (1024 ** 2):.2f} MB")
-            # logger.info(f"Peak allocated memory: {memory_stats['allocated_bytes.all.peak'] / (1024 ** 2):.2f} MB")
-        # logger.info(f"Current reserved memory: {memory_stats['reserved_bytes.all.current'] / (1024 ** 2):.2f} MB")
-            logger.info(f"Peak reserved memory: {memory_stats['reserved_bytes.all.peak'] / (1024 ** 2):.2f} MB")
-        if batch_idx % cfg.PRINT_FREQ == 0:
-            self.log('train_loss', self.losses.avg)
-            self.log('train_acc', self.acc.avg)
+                memory_stats = torch.cuda.memory_stats("cuda:0")
+            # logger.info("Batch shape: {}".format(inp.shape))
+                # logger.info(f"Current allocated memory: {memory_stats['allocated_bytes.all.current'] / (1024 ** 2):.2f} MB")
+                # logger.info(f"Peak allocated memory: {memory_stats['allocated_bytes.all.peak'] / (1024 ** 2):.2f} MB")
+            # logger.info(f"Current reserved memory: {memory_stats['reserved_bytes.all.current'] / (1024 ** 2):.2f} MB")
+                logger.info(f"Peak reserved memory: {memory_stats['reserved_bytes.all.peak'] / (1024 ** 2):.2f} MB")
+            if batch_idx % cfg.PRINT_FREQ == 0:
+                self.log('train_loss', self.losses.avg)
+                self.log('train_acc', self.acc.avg)
 
-            self.global_steps = self.global_steps + 1
+                self.global_steps = self.global_steps + 1
 
-            if int(self.batch_size) < 4:
-                n_images = int(self.batch_size)
-            else:
-                n_images = 4
+                if int(self.batch_size) < 4:
+                    n_images = int(self.batch_size)
+                else:
+                    n_images = 4
 
-            if batch_idx % (cfg.PRINT_FREQ * 4) == 0:
-                try:
-                    inp = inp.detach().cpu().numpy()
-                    gt_j3d = gt_j3d
-                    pred_j3d = pred_j3d
-                    gt_seg = gt_seg
-                    pred_seg_detached = pred_seg_detached
-                    pred_eros_image = pred_eros_image
-                    representation_image = representation_image
+                if batch_idx % (cfg.PRINT_FREQ * 4) == 0:
+                    try:
+                        inp = inp.detach().cpu().numpy()
+                        gt_j3d = gt_j3d
+                        pred_j3d = pred_j3d
+                        gt_seg = gt_seg
+                        pred_seg_detached = pred_seg_detached
+                        pred_eros_image = pred_eros_image
+                        representation_image = representation_image
 
-                    # save_debug_images(self, cfg, representation_image, meta, gt_hms, pred_hms, 'train', self.global_steps, n_images=n_images)
-                    save_debug_3d_joints(self, cfg, inp, meta, gt_j3d, pred_j3d, 'train', global_step=self.global_steps)
-                    save_debug_segmenation(self, cfg, inp, meta, gt_seg, pred_seg_detached, 'train', global_step=self.global_steps)
-                    save_debug_eros(self, cfg, representation_image, meta, pred_eros_image, 'train', global_step=self.global_steps)
-                except Exception as e:
-                    logger.error("Error in saving debug data : {}".format(e))
+                        # save_debug_images(self, cfg, representation_image, meta, gt_hms, pred_hms, 'train', self.global_steps, n_images=n_images)
+                        save_debug_3d_joints(self, cfg, inp, meta, gt_j3d, pred_j3d, 'train', global_step=self.global_steps)
+                        save_debug_segmenation(self, cfg, inp, meta, gt_seg, pred_seg_detached, 'train', global_step=self.global_steps)
+                        save_debug_eros(self, cfg, representation_image, meta, pred_eros_image, 'train', global_step=self.global_steps)
+                    except Exception as e:
+                        logger.error("Error in saving debug data : {}".format(e))
 
-        # except Exception as e:
-        #     logger.info("Error in batch : {}".format(e))
-        #     failure_flag = torch.tensor([1.0], device=self.device)
+        except Exception as e:
+            logger.info("Error in batch : {}".format(e))
+            failure_flag = torch.tensor([1.0], device=self.device)
         
         # Synchronize flags across all processes
         dist.all_reduce(failure_flag, op=dist.ReduceOp.SUM)
