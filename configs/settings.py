@@ -119,7 +119,7 @@ config.CUDNN.DETERMINISTIC = False
 config.CUDNN.ENABLED = True
 
 # common params for NETWORK
-config.MODEL.NAME = 'EgoHPE'
+config.MODEL.NAME = 'EventEgo3Dv2'
 config.MODEL.INIT_WEIGHTS = True
 config.MODEL.PRETRAINED = ''
 

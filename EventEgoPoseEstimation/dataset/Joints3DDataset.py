@@ -47,7 +47,8 @@ class Joints3DDataset(Dataset):
         segmentation_masks = []
         targets = []
 
-        for i in range(self.temporal_bins):
+        # for i in range(self.temporal_bins):
+        for i in range(len(anno['j3d'])):
             rgb_frame_index = anno['rgb_frame_index'][i]
         
         
@@ -296,6 +297,8 @@ class Joints3DDataset(Dataset):
                                
         MPJPE = []
         PAMPJPE = []
+        std_MPJPE = []
+        std_PAMPJPE = []
         for seq_name, seq_range in sequence_range.items():
             start_index, end_index = seq_range
             
@@ -318,18 +321,30 @@ class Joints3DDataset(Dataset):
 
             seq_mpjpe = np.mean(errors) 
             seq_pampjpe = np.mean(errors_pa)
+
+            try:
+                MPJPE_std = np.std(errors)
+                PAMPJPE_std = np.std(errors_pa)
+            except Exception as e:
+                print(f"Error: {e}")
+                MPJPE_std = 0
+                PAMPJPE_std = 0
         
             MPJPE.append(seq_mpjpe)
             PAMPJPE.append(seq_pampjpe)
+            std_MPJPE.append(MPJPE_std)
+            std_PAMPJPE.append(PAMPJPE_std)
         
         name_values = []           
         for i, seq_name in enumerate(sequence_range.keys()):
             name_values.append((f'{seq_name}_MPJPE', MPJPE[i]))
         name_values.append(('MPJPE', np.mean(MPJPE)))
+        name_values.append(('MPJPE_std', np.mean(std_MPJPE)))
 
         for i, seq_name in enumerate(sequence_range.keys()):
             name_values.append((f'{seq_name}_PAMPJPE', PAMPJPE[i]))
         name_values.append(('PAMPJPE', np.mean(PAMPJPE)))
+        name_values.append(('PAMPJPE_std', np.mean(std_PAMPJPE)))
 
         name_values = OrderedDict(name_values)
                 

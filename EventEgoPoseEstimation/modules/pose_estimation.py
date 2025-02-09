@@ -420,8 +420,10 @@ class EventEgoPoseEstimation(LightningModule):
                 pred_j3d = outputs['j3d'] * 1000 # scale to mm        
                 gt_j3d = gt_j3d * 1000 # scale to mm
 
-                # pred_j3d = pred_j3d[:, -1, :, :]
-                # gt_j3d = gt_j3d[:, -1, :, :]
+                # TODO: Currently only the last frame is considered. ALSO CHANGE - representation.py
+                pred_j3d = pred_j3d[:, -1, :, :]
+                gt_j3d = gt_j3d.squeeze(1)
+                valid_j3d = valid_j3d.squeeze(1)
 
                 
                 avg_acc, cnt = accuracy(gt_j3d, pred_j3d, valid_j3d)
@@ -436,10 +438,10 @@ class EventEgoPoseEstimation(LightningModule):
 
                 pred_j3d = pred_j3d.detach()
 
-                self.all_preds_j3d.append(pred_j3d.detach())
-                self.all_gt_j3ds.append(gt_j3d.detach())
-                self.all_vis_j3d.append(valid_j3d.detach())
-                self.all_frame_indices.append(frame_index.detach())
+                self.all_preds_j3d.append(pred_j3d.detach().cpu())
+                self.all_gt_j3ds.append(gt_j3d.detach().cpu())
+                self.all_vis_j3d.append(valid_j3d.detach().cpu())
+                self.all_frame_indices.append(frame_index.detach().cpu())
 
             if batch_idx % cfg.PRINT_FREQ == 0:
                 msg = 'Test: [{0}/{1}]\t' \
@@ -485,22 +487,24 @@ class EventEgoPoseEstimation(LightningModule):
 
 def test_and_generate_vis(cfg, model, test_dataset, tb_log_dir, global_steps):
     fps = 30
-    seq_time_in_sec = 30
+    seq_time_in_sec = 60
 
     seq_len = seq_time_in_sec * fps
     data_len = len(test_dataset)
 
-    start = np.random.randint(0, data_len - cfg.DATASET.TEMPORAL_STEPS)
+    # start = np.random.randint(0, data_len - cfg.DATASET.TEMPORAL_STEPS)
+    start = np.random.randint(0, data_len - seq_len)
     stop = min(start + seq_len, data_len)
 
     tb_log_dir = Path(tb_log_dir)
     video_path = str(tb_log_dir / f'{global_steps}.mp4')
 
-    video = cv2.VideoWriter(video_path, cv2.VideoWriter_fourcc(*'mp4v'), fps, (400 * 2, 300 * 1))
+    video = cv2.VideoWriter(video_path, cv2.VideoWriter_fourcc(*'mp4v'), fps, (400 * 1, 300 * 1))
 
     model.eval()
 
-
+    print(f"Path : {video_path}")
+    print(f"Generating video from {start} to {stop}")
     for i in range(start, stop):
         gt_j3d = []
         inps = []
@@ -514,7 +518,7 @@ def test_and_generate_vis(cfg, model, test_dataset, tb_log_dir, global_steps):
 
         inps.append(inp[None, None, ...])
         gt_j3d.append(gt_j3d_[None, ...])
-        gt_hms.append(data['hms'][None, ...])
+        # gt_hms.append(data['hms'][None, ...])
 
         inps = torch.cat(inps, dim=0).cuda()
         
@@ -529,30 +533,49 @@ def test_and_generate_vis(cfg, model, test_dataset, tb_log_dir, global_steps):
         # gt_hms = torch.cat(gt_hms, dim=0).detach()
         # gt_hm_j2ds = get_j2d_from_hms(cfg, gt_hms)
 
-        representation = outputs['representation']
-        representation_image = create_image(representation)
+        # representation = outputs['representation']
+        # representation_image = create_image(representation)
 
         T, B, N, C = inps.shape
 
         for i in range(T):
             gt_j3d = gt_j3ds[i]
-            gt_hm = gt_hms[i]
+            # gt_hm = gt_hms[i]
             # gt_hm_j2d = gt_hm_j2ds[i]
             
             pred_j3d = pred_j3ds[i]
+
+            # if gt_j3d.dim() == 0 or pred_j3d.dim() == 0:
+            #     continue
+
+
+            # TODO: Include all bins in the visualization
+            # for j in range(len(gt_j3d)):
+
+            # try:
+            # gt_j3d = gt_j3d[j]
+            # pred_j3d = pred_j3d[j]
+            # except:
+            #     import pdb; pdb.set_trace()
+
+
+            # import pdb; pdb.set_trace()
+            gt_j3d = gt_j3d[-1, :, :]
+            pred_j3d = pred_j3d[-1, :, :]
+
             # pred_j2d = pred_j2ds[i]
             # pred_hm = preds_hms[i]
 
-            inp = representation_image
-            inp = inp[i]
-            grid = torchvision.utils.make_grid(inp)
-            inp = grid.mul(255).clamp(0, 255).byte().permute(1, 2, 0).detach()
-           
+            # inp = representation_image
+            # inp = inp[i]
+            # grid = torchvision.utils.make_grid(inp)
+            # inp = grid.mul(255).clamp(0, 255).byte().permute(1, 2, 0).detach()
+        
 
             # pred_hm_image = plot_heatmaps(inp, pred_hm)    
             # gt_hm_image = plot_heatmaps(inp, gt_hm)
 
-            inp = inp.astype(np.uint8)
+            # inp = inp.astype(np.uint8)
 
             # inp_w_gt_hm_j2d = Skeleton.draw_2d_skeleton(inp, gt_hm_j2d, lines=True)
             # inp = Skeleton.draw_2d_skeleton(inp, pred_j2d, lines=True)
@@ -561,17 +584,18 @@ def test_and_generate_vis(cfg, model, test_dataset, tb_log_dir, global_steps):
             color = color[..., ::-1]
             
             color = cv2.resize(color, (400, 300))
-            inp = cv2.resize(inp, (400, 300))
-            pred_hm_image = cv2.resize(pred_hm_image, (400, 300))
-            gt_hm_image = cv2.resize(gt_hm_image, (400, 300))
-            inp_w_gt_hm_j2d = cv2.resize(inp_w_gt_hm_j2d, (400, 300))           
+            # inp = cv2.resize(inp, (400, 300))
+            # pred_hm_image = cv2.resize(pred_hm_image, (400, 300))
+            # gt_hm_image = cv2.resize(gt_hm_image, (400, 300))
+            # inp_w_gt_hm_j2d = cv2.resize(inp_w_gt_hm_j2d, (400, 300))           
             
-            hstack1 = np.concatenate([inp, color], axis=1)
-            hstack2 = np.concatenate([gt_hm_image, pred_hm_image], axis=1)
-            hstack3 = np.concatenate([inp_w_gt_hm_j2d, np.zeros_like(inp_w_gt_hm_j2d)], axis=1)
+            # hstack1 = np.concatenate([inp, color], axis=1)
+            # hstack2 = np.concatenate([gt_hm_image, pred_hm_image], axis=1)
+            # hstack3 = np.concatenate([inp_w_gt_hm_j2d, np.zeros_like(inp_w_gt_hm_j2d)], axis=1)
             
-            vstack = np.concatenate([hstack1, hstack2, hstack3], axis=0)
-            video.write(vstack)
+            # vstack = np.concatenate([hstack1, hstack2, hstack3], axis=0)
+            video.write(color)
+            # video.write(vstack)
 
     video.release()
 
@@ -589,21 +613,26 @@ class EvaluateCallback(Callback):
         # Ensure you're working with the correct model type
         model = pl_module  # 'pl_module' is the model instance
 
+        if model.test_dataset is not None:
+            dataset = model.test_dataset
+        else:
+            dataset = model.eval_dataset
+
         all_preds_j3d = np.concatenate(model.all_preds_j3d, axis=0)
         all_gt_j3ds = np.concatenate(model.all_gt_j3ds, axis=0)
         all_vis_j3d = np.concatenate(model.all_vis_j3d, axis=0)
         all_frame_indices = np.concatenate(model.all_frame_indices, axis=0)
 
-        np.save("all_preds_j3d.npy", all_preds_j3d)
-        np.save("all_gt_j3ds.npy", all_gt_j3ds)
-        np.save("all_vis_j3d.npy", all_vis_j3d)
-        np.save("all_frame_indices.npy", all_frame_indices)
+        # np.save("all_preds_j3d.npy", all_preds_j3d)
+        # np.save("all_gt_j3ds.npy", all_gt_j3ds)
+        # np.save("all_vis_j3d.npy", all_vis_j3d)
+        # np.save("all_frame_indices.npy", all_frame_indices)
 
         # all_frame_indices = np.array(model.all_frame_indices)
 
         # name_values, perf_indicator = val_dataset.evaluate_dataset(config, frame_indices=all_frame_indices, all_gt_j3ds=all_gt_j3ds, all_preds_j3d=all_preds_j3d, all_vis_j3d=all_vis_j3d)
         if model.dataset_type == "real":
-            name_values, _ = model.eval_dataset.evaluate_dataset(cfg, frame_indices=all_frame_indices, all_gt_j3ds=all_gt_j3ds, all_preds_j3d=all_preds_j3d, all_vis_j3d=all_vis_j3d)
+            name_values, _ = dataset.evaluate_dataset(cfg, frame_indices=all_frame_indices, all_gt_j3ds=all_gt_j3ds, all_preds_j3d=all_preds_j3d, all_vis_j3d=all_vis_j3d)
 
             model_name = cfg.MODEL.NAME
             print("Error Per Actions : ")
@@ -614,7 +643,7 @@ class EvaluateCallback(Callback):
                 _print_name_value(name_values, model_name)
 
         
-        name_values, _ = model.eval_dataset.evaluate_joints(cfg, all_gt_j3ds=all_gt_j3ds, all_preds_j3d=all_preds_j3d, all_vis_j3d=all_vis_j3d)
+        name_values, _ = dataset.evaluate_joints(cfg, all_gt_j3ds=all_gt_j3ds, all_preds_j3d=all_preds_j3d, all_vis_j3d=all_vis_j3d)
         model_name = cfg.MODEL.NAME
         print("Error Per Joints : ")
         if isinstance(name_values, list):

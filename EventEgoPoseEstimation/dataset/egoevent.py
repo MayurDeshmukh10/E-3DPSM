@@ -41,7 +41,8 @@ class SingleSequenceDataset(Joints3DDataset):
         vis_j3ds = []
         valid_seg_list = []
         ego_to_global_space_list = []
-        for i in range(self.temporal_bins):
+        # for i in range(self.temporal_bins):
+        for i in range(len(item['ego_j3d'])):
             if item['ego_to_global_space'] is None:
                 ego_to_global_space = None
             else:
