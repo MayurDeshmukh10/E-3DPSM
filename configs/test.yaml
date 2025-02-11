@@ -46,9 +46,9 @@ trainer:
   benchmark: false
   precision: 16-mixed
   strategy: ddp_find_unused_parameters_true
-  fast_dev_run: false
-  # limit_train_batches: 2
-  # limit_val_batches: 2
+  fast_dev_run: true
+  limit_train_batches: 1000
+  limit_val_batches: 10
   # every_n_train_steps: 200
 #  gradient_clip_val: 5.0
 #  gradient_clip_algorithm: norm
@@ -70,10 +70,22 @@ trainer:
         # dirpath: "./results/"
         save_last: True
 
-  logger:
-    - class_path: pytorch_lightning.loggers.TensorBoardLogger
-      init_args:
-        save_dir: ./results/
-        name: test # Experiment name
+  # logger:
+  #   - class_path: pytorch_lightning.loggers.TensorBoardLogger
+  #     init_args:
+  #       save_dir: ./results/
+  #       name: test # Experiment name
 
+  logger:
+  - class_path: pytorch_lightning.loggers.WandbLogger
+    init_args:
+      name: test8  # Experiment name on wandb
+      project: EventEgo3Dv2  # Replace with your project name on wandb
+      save_dir: ./results/test8  # Local directory to save wandb logs
+      log_model: true  # Log the model checkpoints to wandb
+      offline: false  # Set to true if you want to log offline and sync later
+  - class_path: pytorch_lightning.loggers.TensorBoardLogger
+    init_args:
+      save_dir: ./results/
+      name: test  # TensorBoard experiment name
 
