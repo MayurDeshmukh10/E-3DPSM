@@ -320,7 +320,9 @@ def save_debug_3d_joints(self, config, inp, meta, gt_j3d, pred_j3d, prefix, glob
 
     color = generate_skeleton_image(gt_j3d, pred_j3d)
     # writer.add_image(prefix + '_j3d', color, global_step, dataformats='HWC')
-    self.logger.experiment.add_image(prefix + '_j3d', color, global_step, dataformats='HWC')
+    # self.logger.experiment.add_image(prefix + '_j3d', color, global_step, dataformats='HWC')
+    # import pdb; pdb.set_trace()
+    self.logger.log_image(prefix + '_j3d', [color], step=global_step)
 
 
     return color

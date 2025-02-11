@@ -98,6 +98,7 @@ class EventEgoPoseEstimation(LightningModule):
         self.eval_dataset: Optional[Dataset] = None
         self.test_dataset: Optional[Dataset] = None
 
+        # Losses
         self.criterions = {
             'j3d': J3dMSELoss(
                 use_target_weight=cfg.LOSS.USE_TARGET_WEIGHT
@@ -108,34 +109,31 @@ class EventEgoPoseEstimation(LightningModule):
             'seg': SegmentationLoss().cuda()
         }
 
-        self.all_gt_j3ds = []
-        self.all_preds_j3d = []
-        self.all_vis_j3d = []
-        self.all_frame_indices = []
-
-        self.batch_time = AverageMeter()
-        self.acc_j3d = AverageMeter()
-
+        # performance metrics
         self.batch_time = AverageMeter()
         self.data_time = AverageMeter()
 
-        self.losses = AverageMeter()
 
+        # Training metrics
         self.j3d_delta_losses = AverageMeter()
         self.j3d_losses = AverageMeter()    
         self.seg_losses = AverageMeter()
-
+        self.losses = AverageMeter()
         self.acc = AverageMeter()
+
+        # Validation metrics
         self.acc_j3d_val = AverageMeter()
-
-        self.global_steps = 0
-
+        self.j3d_loss_val = AverageMeter()
         self.all_gt_j3ds = []
         self.all_preds_j3d = []
         self.all_vis_j3d = []
         self.all_frame_indices = []
+
+        self.global_steps = 0
+        self.global_val_steps = 0
+
         self.train_dataloader_len = 0
-        self.val_dataloader_len = 0\
+        self.val_dataloader_len = 0
 
         # self.initial_pose = torch.from_numpy(np.load('./initial_pose.npy')).unsqueeze(0).expand(self.model_batch_size, -1, -1)
 
@@ -173,17 +171,19 @@ class EventEgoPoseEstimation(LightningModule):
             else:
                 finetune_dataset = EgoEvent(cfg, temporal_bins=self.temporal_bins, split='train', finetune=True)
 
-            cfg.DATASET.TYPE = 'Real'    
-            self.eval_dataset = EgoEvent(cfg, temporal_bins=self.temporal_bins, split='test')
 
 
             if self.training_type == 'pretrain':
                 pretraining = True
                 logger.info("Training type: Pretrain")
+                cfg.DATASET.TYPE = 'Synthetic'
+                self.eval_dataset = EgoEvent(cfg, temporal_bins=self.temporal_bins, split='val')
                 self.train_dataset = TemoralWrapper(pretrain_dataset, cfg.DATASET.TEMPORAL_STEPS, augment=True)
             elif self.training_type == 'finetune':
                 pretraining = False
                 logger.info("Training type: Finetune")
+                cfg.DATASET.TYPE = 'Real'    
+                self.eval_dataset = EgoEvent(cfg, temporal_bins=self.temporal_bins, split='val')
                 self.train_dataset = TemoralWrapper(finetune_dataset, cfg.DATASET.TEMPORAL_STEPS, augment=False)
             else:
                 assert False, f"Invalid training type: {self.training_type}"
@@ -241,6 +241,11 @@ class EventEgoPoseEstimation(LightningModule):
         )
         self.val_dataloader_len = len(dataloader)
         return dataloader
+
+
+    def on_load_checkpoint(self, checkpoint: dict):
+        checkpoint['optimizer_states'][0]['param_groups'][0]['lr'] =  self.lr
+
 
     def training_step(self, batch, batch_idx):
         end = time.time()
@@ -338,15 +343,18 @@ class EventEgoPoseEstimation(LightningModule):
                         )
                 logger.info(msg)
 
-                memory_stats = torch.cuda.memory_stats("cuda:0")
+                # memory_stats = torch.cuda.memory_stats("cuda:0")
             # logger.info("Batch shape: {}".format(inp.shape))
                 # logger.info(f"Current allocated memory: {memory_stats['allocated_bytes.all.current'] / (1024 ** 2):.2f} MB")
                 # logger.info(f"Peak allocated memory: {memory_stats['allocated_bytes.all.peak'] / (1024 ** 2):.2f} MB")
             # logger.info(f"Current reserved memory: {memory_stats['reserved_bytes.all.current'] / (1024 ** 2):.2f} MB")
-                logger.info(f"Peak reserved memory: {memory_stats['reserved_bytes.all.peak'] / (1024 ** 2):.2f} MB")
+                # logger.info(f"Peak reserved memory: {memory_stats['reserved_bytes.all.peak'] / (1024 ** 2):.2f} MB")
             if batch_idx % cfg.PRINT_FREQ == 0:
                 self.log('train_loss', self.losses.avg)
                 self.log('train_acc', self.acc.avg)
+
+                current_lr = self.trainer.optimizers[0].param_groups[0]['lr']
+                self.log("learning_rate", current_lr)
 
                 self.global_steps = self.global_steps + 1
 
@@ -358,8 +366,8 @@ class EventEgoPoseEstimation(LightningModule):
                 if batch_idx % (cfg.PRINT_FREQ * 4) == 0:
                     try:
                         inp = inp.detach().cpu().numpy()
-                        gt_j3d = gt_j3d
-                        pred_j3d = pred_j3d
+                        gt_j3d = gt_j3d.detach()
+                        pred_j3d = pred_j3d.detach()
                         gt_seg = gt_seg
                         pred_seg_detached = pred_seg_detached
                         pred_eros_image = pred_eros_image
@@ -367,8 +375,8 @@ class EventEgoPoseEstimation(LightningModule):
 
                         # save_debug_images(self, cfg, representation_image, meta, gt_hms, pred_hms, 'train', self.global_steps, n_images=n_images)
                         save_debug_3d_joints(self, cfg, inp, meta, gt_j3d, pred_j3d, 'train', global_step=self.global_steps)
-                        save_debug_segmenation(self, cfg, inp, meta, gt_seg, pred_seg_detached, 'train', global_step=self.global_steps)
-                        save_debug_eros(self, cfg, representation_image, meta, pred_eros_image, 'train', global_step=self.global_steps)
+                        # save_debug_segmenation(self, cfg, inp, meta, gt_seg, pred_seg_detached, 'train', global_step=self.global_steps)
+                        # save_debug_eros(self, cfg, representation_image, meta, pred_eros_image, 'train', global_step=self.global_steps)
                     except Exception as e:
                         logger.error("Error in saving debug data : {}".format(e))
 
@@ -406,63 +414,103 @@ class EventEgoPoseEstimation(LightningModule):
         end = time.time()
 
         self.model.eval()
-        
-        if vis == False:
-            with torch.amp.autocast('cuda', enabled=True):
 
-                try:
-                    inp, outputs, gt_hms, gt_j3d, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index, status = compute_fn(self.model, batch, self.temporal_steps, buffer, key, batch_first=True, device=self.device)
-                except RuntimeError as e:
-                    logger.info("Error in batch : {}".format(e))
-                    return
+        with torch.no_grad():
+            if vis == False:
+                with torch.amp.autocast('cuda', enabled=True):
 
-                
-                meta = {'j3d': gt_j3d, 'j2d': gt_j2d, 'vis_j2d': vis_j2d, 'vis_j3d': vis_j3d}
+                    try:
+                        inp, outputs, gt_hms, gt_j3d, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index, status = compute_fn(self.model, batch, self.temporal_steps, buffer, key, batch_first=True, device=self.device)
+                    except RuntimeError as e:
+                        logger.info("Error in batch : {}".format(e))
+                        return
 
-                pred_j3d = outputs['j3d'] * 1000 # scale to mm        
-                gt_j3d = gt_j3d * 1000 # scale to mm
+                    
+                    meta = {'j3d': gt_j3d, 'j2d': gt_j2d, 'vis_j2d': vis_j2d, 'vis_j3d': vis_j3d}
 
-                # TODO: Currently only the last frame is considered. ALSO CHANGE - representation.py
-                pred_j3d = pred_j3d[:, -1, :, :]
-                gt_j3d = gt_j3d.squeeze(1)
-                valid_j3d = valid_j3d.squeeze(1)
+                    pred_j3d = outputs['j3d'] * 1000 # scale to mm        
+                    gt_j3d = gt_j3d * 1000 # scale to mm
 
-                
-                avg_acc, cnt = accuracy(gt_j3d, pred_j3d, valid_j3d)
-                self.acc_j3d_val.update(avg_acc, cnt)
-                
-                # measure elapsed time
-                self.batch_time.update(time.time() - end)
-                end = time.time()
+                    # TODO: Currently only the last frame is considered. ALSO CHANGE - representation.py
+                    pred_j3d = pred_j3d[:, -1, :, :]
+                    gt_j3d = gt_j3d[:, -1, :, :]
+                    valid_j3d = valid_j3d[:, -1, :, :]
+                    vis_j3d = vis_j3d[:, -1, :, :]
+                    gt_j3d = gt_j3d.squeeze(1)
+                    valid_j3d = valid_j3d.squeeze(1)
 
-                # representation = outputs['representation']
-                # representation_image = create_image(representation)
+                    val_loss_j3d = self.criterions['j3d'](pred_j3d, gt_j3d, vis_j3d * 1e-2)  # scale to 1e-2
+                    self.j3d_loss_val.update(val_loss_j3d, inp.size(0))
+                    
+                    avg_acc, cnt = accuracy(gt_j3d, pred_j3d, valid_j3d)
+                    self.acc_j3d_val.update(avg_acc, cnt)
+                    
+                    # measure elapsed time
+                    self.batch_time.update(time.time() - end)
+                    end = time.time()
 
-                pred_j3d = pred_j3d.detach()
+                    # representation = outputs['representation']
+                    # representation_image = create_image(representation)
 
-                self.all_preds_j3d.append(pred_j3d.detach().cpu())
-                self.all_gt_j3ds.append(gt_j3d.detach().cpu())
-                self.all_vis_j3d.append(valid_j3d.detach().cpu())
-                self.all_frame_indices.append(frame_index.detach().cpu())
+                    self.log('val_loss', self.j3d_loss_val.avg, sync_dist=True)
+                    self.log('val_acc', self.acc_j3d_val.avg, sync_dist=True)
 
-            if batch_idx % cfg.PRINT_FREQ == 0:
-                msg = 'Test: [{0}/{1}]\t' \
-                    'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t' \
-                    'MPJPE {acc.val:.4f} ({acc.avg:.4f})\t'.format(
-                        batch_idx, self.val_dataloader_len, batch_time=self.batch_time,
-                        acc=self.acc_j3d_val)
-                logger.info(msg)
 
-        elif prefix == "test" and vis == True:
-            global_steps=batch_idx
-            tb_log_dir = self.logger.log_dir
-            test_and_generate_vis(cfg, self.model, self.test_dataset, tb_log_dir, global_steps)
+                    self.all_preds_j3d.append(pred_j3d.detach().cpu())
+                    self.all_gt_j3ds.append(gt_j3d.detach().cpu())
+                    self.all_vis_j3d.append(valid_j3d.detach().cpu())
+                    self.all_frame_indices.append(frame_index.detach().cpu())
+
+                if batch_idx % cfg.PRINT_FREQ == 0:
+
+                    self.global_val_steps = self.global_val_steps + 1
+                    
+                    msg = 'Test: [{0}/{1}]\t' \
+                        'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t' \
+                        'MPJPE {acc.val:.4f} ({acc.avg:.4f})\t' \
+                        'Val loss  {val_loss.val:.4f} ({val_loss.avg:.4f})\t'.format(
+                            batch_idx, self.val_dataloader_len, batch_time=self.batch_time,
+                            acc=self.acc_j3d_val, val_loss=self.j3d_loss_val)
+                    logger.info(msg)
+
+                    # try:
+                    #     inp = inp.detach().cpu().numpy()
+                    #     gt_j3d = gt_j3d.detach()
+                    #     pred_j3d = pred_j3d.detach()
+                    #     # gt_j3d = gt_j3d.detach().cpu().numpy()
+                    #     import pdb; pdb.set_trace()
+                    #     save_debug_3d_joints(self, cfg, inp, meta, gt_j3d, pred_j3d, 'val', global_step=self.global_val_steps)
+                    # except Exception as e:
+                    #     logger.error("Error in saving val debug data : {}".format(e))
+
+            elif prefix == "test" and vis == True:
+                global_steps=batch_idx
+                tb_log_dir = self.logger.log_dir
+                test_and_generate_vis(cfg, self.model, self.test_dataset, tb_log_dir, global_steps)
 
     def validation_step(self, batch, batch_idx):
         return self.eval_step(batch, batch_idx, "val")
 
     def test_step(self, batch, batch_idx):
         return self.eval_step(batch, batch_idx, "test", vis=False)
+    
+
+    def on_validation_epoch_start(self):
+        self.all_gt_j3ds = []
+        self.all_preds_j3d = []
+        self.all_vis_j3d = []
+        self.all_frame_indices = []
+        self.acc_j3d_val.reset()
+        self.j3d_loss_val.reset()
+
+    def on_train_epoch_start(self):
+        self.j3d_delta_losses.reset()
+        self.j3d_losses.reset()
+        self.seg_losses.reset()
+        self.losses.reset()
+        self.acc.reset()
+        self.batch_time.reset()
+        self.data_time.reset()
 
     def configure_optimizers(self):
         optimizer = None
