@@ -213,9 +213,9 @@ class EROS(nn.Module):
         # quantized_events = crop_and_resize_to_resolution(quantized_events, (self.height, self.width))
         _, _, height, width = quantized_events.shape
             
-        confidence = self.confidence_network(key) 
+        # confidence = self.confidence_network(key) 
 
-        confidence = F.interpolate(confidence, size=(height, width), mode='bilinear', align_corners=False)
+        # confidence = F.interpolate(confidence, size=(height, width), mode='bilinear', align_corners=False)
         # confidence = F.interpolate(confidence, size=(inp.shape[2], inp.shape[3]), mode='bilinear', align_corners=False)
 
         # try:
@@ -229,7 +229,7 @@ class EROS(nn.Module):
         out = (out - old_min) * (new_max - new_min) / (old_max - old_min) + new_min
 
         # return out, confidence, buffer, quantized_events
-        return out, confidence, buffer, quantized_events.clone().detach()
+        return out, buffer, quantized_events.clone().detach()
 
 
 class EgoHPE(nn.Module):
@@ -288,18 +288,18 @@ class EgoHPE(nn.Module):
         j3ds = []
         seg_outs = []
 
-        confidences = []
+        # confidences = []
         buffers = []
         # states_store = []
 
         for i in range(T):
             if self.enable_eros:
-                out, confidence, buffer, representation = self.EROS(buffer, x[i], key, device)
+                out, buffer, representation = self.EROS(buffer, x[i], key, device)
             else:
                 out = x[i]
 
             buffers.append(buffer)
-            confidences.append(confidence)
+            # confidences.append(confidence)
      
             outs = self.event_3d_posenet(out, prev_states)
             
@@ -334,7 +334,7 @@ class EgoHPE(nn.Module):
         j3ds = torch.cat(j3ds, dim=0)
         seg_outs = torch.cat(seg_outs, dim=0)
          
-        confidences = torch.cat(confidences, dim=0)
+        # confidences = torch.cat(confidences, dim=0)
         buffers = torch.cat(buffers, dim=0)     
         delta_j3ds = torch.cat(delta_j3ds, dim=0)  
         
@@ -344,7 +344,7 @@ class EgoHPE(nn.Module):
         outputs['eros'] = eross
         outputs['seg'] = seg_outs
  
-        outputs['confidence'] = confidences
+        # outputs['confidence'] = confidences
         outputs['buffer'] = buffers
         outputs['representation'] = representation
         outputs['prev_states'] = prev_states
