@@ -410,6 +410,7 @@ class RawEvent:
 
         if data_batch.shape[-1] >= 5:
             # data['frame_index'] = fs[-1]
+            # data['frame_index'] = torch.tensor([fs[-1]])
             data['frame_index'] = bin_frame_indices        
         
         if data_batch.shape[-1] == 6:

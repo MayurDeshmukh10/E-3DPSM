@@ -404,6 +404,8 @@ class EventEgoPoseEstimation(LightningModule):
         key = torch.ones(self.model_batch_size, 1, hm_H, hm_W, device=self.device)
 
         end = time.time()
+
+        self.model.eval()
         
         if vis == False:
             with torch.amp.autocast('cuda', enabled=True):
