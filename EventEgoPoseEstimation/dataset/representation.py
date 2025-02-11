@@ -273,68 +273,55 @@ def compute_temporal_weights(ts, num_bins):
     
     return weights
 
-def interpolate_empty_bins(bin_frame_indices, sum_weighted_fs, sum_weights):
-    # After computing initial bin_frame_indices with -1 for empty bins:
-    average_fs = sum_weighted_fs / (sum_weights + 1e-6)
-    bin_frame_indices = torch.round(average_fs).to(torch.long)
-    valid_mask = sum_weights != 0
+def interpolate_missing_bins(bin_frame_indices, missing_value=-1):
+    """
+    Replace missing values in bin_frame_indices (indicated by missing_value) using linear interpolation.
+    
+    Args:
+        bin_frame_indices (torch.Tensor): 1D tensor of bin frame indices.
+        missing_value (int, optional): The placeholder value indicating missing data. Default is -1.
+    
+    Returns:
+        torch.Tensor: Tensor with missing values interpolated.
+    """
+    bin_frame_indices = bin_frame_indices.clone()  # Avoid in-place modifications
+    num_bins = bin_frame_indices.size(0)
+    
+    # Find indices where the value is not missing
+    valid_mask = bin_frame_indices != missing_value
+    valid_indices = torch.nonzero(valid_mask, as_tuple=True)[0]
+    
+    # If no valid indices exist, you might want to set a default (or raise an error)
+    if valid_indices.numel() == 0:
+        raise ValueError("No valid bin indices available for interpolation.")
 
-    # Handle interpolation for bins with no events
-    if not torch.any(valid_mask):
-        # Fallback if ALL bins are empty (set to first frame index or other default)
-        bin_frame_indices[:] = 0  
-    else:
-        num_bins = bin_frame_indices.size(0)
-        device = bin_frame_indices.device
-        
-        # Find nearest valid neighbors
-        bin_indices = torch.arange(num_bins, device=device)
-        
-        # 1. Find previous valid indices
-        prev_valid = -torch.ones(num_bins, dtype=torch.long, device=device)
-        last_valid = -1
-        for i in range(num_bins):
-            if valid_mask[i]:
-                last_valid = i
-            prev_valid[i] = last_valid
-        
-        # 2. Find next valid indices
-        next_valid = -torch.ones(num_bins, dtype=torch.long, device=device)
-        first_valid = -1
-        for i in reversed(range(num_bins)):
-            if valid_mask[i]:
-                first_valid = i
-            next_valid[i] = first_valid
-        
-        # 3. Interpolate missing values
-        for i in range(num_bins):
-            if valid_mask[i]: continue
+    # Process each bin index
+    for i in range(num_bins):
+        if bin_frame_indices[i] == missing_value:
+            # Find the closest valid indices before and after
+            prev_valid = valid_indices[valid_indices < i]
+            next_valid = valid_indices[valid_indices > i]
+
+            if prev_valid.numel() > 0 and next_valid.numel() > 0:
+                # Both previous and next valid bins exist: use linear interpolation.
+                left_idx = prev_valid[-1].item()
+                right_idx = next_valid[0].item()
+                left_val = bin_frame_indices[left_idx].float()
+                right_val = bin_frame_indices[right_idx].float()
+
+                # Calculate a weight for the interpolation based on positions
+                alpha = (i - left_idx) / (right_idx - left_idx)
+                interpolated_value = (1 - alpha) * left_val + alpha * right_val
+                bin_frame_indices[i] = int(round(interpolated_value.item()))
+            elif prev_valid.numel() > 0:
+                # Only previous valid exists (e.g., missing at the end): use the previous value.
+                left_idx = prev_valid[-1].item()
+                bin_frame_indices[i] = bin_frame_indices[left_idx]
+            elif next_valid.numel() > 0:
+                # Only next valid exists (e.g., missing at the beginning): use the next value.
+                right_idx = next_valid[0].item()
+                bin_frame_indices[i] = bin_frame_indices[right_idx]
                 
-            prev_idx = prev_valid[i].item()
-            next_idx = next_valid[i].item()
-            
-            if prev_idx == -1 and next_idx == -1:
-                continue  # Handled by fallback case
-                
-            elif prev_idx == -1:  # Only next valid exists
-                bin_frame_indices[i] = bin_frame_indices[next_idx]
-                
-            elif next_idx == -1:  # Only previous valid exists
-                bin_frame_indices[i] = bin_frame_indices[prev_idx]
-                
-            else:  # Linear interpolation between neighbors
-                pos = i
-                prev_pos = prev_idx
-                next_pos = next_idx
-                
-                # Weight by inverse distance
-                total_dist = next_pos - prev_pos
-                prev_weight = (next_pos - pos) / total_dist
-                next_weight = (pos - prev_pos) / total_dist
-                
-                interpolated = (prev_weight * bin_frame_indices[prev_idx].float() +
-                            next_weight * bin_frame_indices[next_idx].float()).round().long()
-                bin_frame_indices[i] = interpolated
     return bin_frame_indices
 
 class RawEvent:
@@ -356,7 +343,15 @@ class RawEvent:
         else:
             raise ValueError('Invalid data_batch shape')
 
-        ts = (ts - ts.min()) / (ts.max() - ts.min()) # normalize timestamps
+        ts_min = ts.min()
+        ts_max = ts.max()
+        ts_range = ts_max - ts_min
+
+        if ts_range == 0:
+            ts = ts - ts_min
+        else:
+            ts = (ts - ts.min()) / (ts.max() - ts.min()) # normalize timestamps
+        
         ts = ts.astype(np.float32)
         
         # xs, ys = self.resize_transform(xs, ys)
@@ -392,7 +387,9 @@ class RawEvent:
         # Handle bins with no events (optional: interpolate or use default)
         # TODO: Add interpolation for empty bins
         bin_frame_indices[sum_weights == 0] = -1  # Placeholder for no data
-        # bin_frame_indices = interpolate_empty_bins(bin_frame_indices, sum_weighted_fs, sum_weights)
+        if -1 in bin_frame_indices:
+            bin_frame_indices = interpolate_missing_bins(bin_frame_indices)
+            # print("Interpolated missing bins", bin_frame_indices)
 
         # print("frame index: ", fs[-1])
         # print("bin_frame_indices: ", bin_frame_indices)
