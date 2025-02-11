@@ -11,3 +11,4 @@ scripts/
 og_results/
 dataset_splits_ssm_branch/
 EventEgoPoseEstimation/model/quantization_layer_init/
+lightning_logs/
