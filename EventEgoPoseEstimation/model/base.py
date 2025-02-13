@@ -231,9 +231,9 @@ class Event3DPoseNet(nn.Module):
                     batch_size=B * h_new * w_new
                 ).to(x.device)
             else:
-                states = rearrange(states, "B C H W -> (B H W) C")
+                states = rearrange(states, "B C H W -> (B H W) C").contiguous()
 
-            x = rearrange(x, "B C H W -> (B H W) 1 C")
+            x = rearrange(x, "B C H W -> (B H W) 1 C").contiguous()
 
             x, states = self.s5_block(x, states)
 
@@ -241,11 +241,11 @@ class Event3DPoseNet(nn.Module):
 
             x = rearrange(
                 x, "(B H W) 1 C -> B C H W", B=B, H=int(h_new), W=int(w_new)
-            )
+            ).contiguous()
 
             last_layer_features = x
 
-            states = rearrange(states, "(B H W) C -> B C H W", H=h_new, W=w_new)
+            states = rearrange(states, "(B H W) C -> B C H W", H=h_new, W=w_new).contiguous()
 
             for index, seg in enumerate(self.segmentation_decoder):
                 x_seg = seg(x)
