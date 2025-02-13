@@ -137,7 +137,7 @@ class EventEgoPoseEstimation(LightningModule):
 
         # self.initial_pose = torch.from_numpy(np.load('./initial_pose.npy')).unsqueeze(0).expand(self.model_batch_size, -1, -1)
 
-        self.automatic_optimization = False
+        self.automatic_optimization = True
 
        
         
@@ -177,6 +177,7 @@ class EventEgoPoseEstimation(LightningModule):
                 pretraining = True
                 logger.info("Training type: Pretrain")
                 cfg.DATASET.TYPE = 'Synthetic'
+                cfg.DATASET.SYN_ROOT = cfg.DATASET.SYN_TEST_ROOT 
                 self.eval_dataset = EgoEvent(cfg, temporal_bins=self.temporal_bins, split='val')
                 self.train_dataset = TemoralWrapper(pretrain_dataset, cfg.DATASET.TEMPORAL_STEPS, augment=True)
             elif self.training_type == 'finetune':
@@ -249,50 +250,44 @@ class EventEgoPoseEstimation(LightningModule):
 
     def training_step(self, batch, batch_idx):
         end = time.time()
-
-        failure_flag = torch.tensor([0.0], device=self.device)
         loss = None
-        # scaler = self.trainer.precision_plugin.scaler  # Lightning provides this if AMP is enabled
-        optimizer = self.optimizers()
-        optimizer.zero_grad(set_to_none=True) # set_to_none=True is more efficient and saves memory
 
         try:
-            with torch.amp.autocast('cuda', enabled=True):
-                inp, outputs, gt_hms, gt_j3d, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index, status = compute_fn(self.model, batch, self.temporal_steps, device=self.device)
+            inp, outputs, gt_hms, gt_j3d, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index, status = compute_fn(self.model, batch, self.temporal_steps, device=self.device)
 
-                valid_seg = valid_seg.expand(-1, self.temporal_bins)
-                valid_seg = valid_seg.view(self.model_batch_size, self.temporal_bins, 1, 1, 1)
+            valid_seg = valid_seg.expand(-1, self.temporal_bins)
+            valid_seg = valid_seg.view(self.model_batch_size, self.temporal_bins, 1, 1, 1)
 
-                meta = {'j3d': gt_j3d, 'j2d': gt_j2d, 'vis_j2d': vis_j2d, 'vis_j3d': vis_j3d}
+            meta = {'j3d': gt_j3d, 'j2d': gt_j2d, 'vis_j2d': vis_j2d, 'vis_j3d': vis_j3d}
+            
+            # pred_hms = outputs['hms']
+            pred_seg = outputs['seg']
+            pred_eros = outputs['eros']
+            
+            gt_j3d = gt_j3d  * 1000 # scale to mm
+            pred_j3d = outputs['j3d'] * 1000 # scale to mm
+            pred_j3d_deltas = outputs['delta_j3d'] * 1000 # scale to mm
+            # initial_pose = self.initial_pose
+            # initial_j3d = initial_pose.cuda() * 1000
+
+            # all_gt_j3d = torch.cat([initial_j3d.unsqueeze(1), gt_j3d], dim=1)
+            all_gt_j3d = gt_j3d
+
+            gt_j3d_deltas = all_gt_j3d[:, 1:, :, :] - all_gt_j3d[:, :-1, :, :]
+
+        # dump_sketelon_image(test_gt_j3d, f"./visualizations/{10}_gt_j3d.png")
+
+        # with torch.amp.autocast('cuda', enabled=True):
+            loss_j3d_delta = self.criterions['delta_j3d'](pred_j3d_deltas, gt_j3d_deltas, vis_j3d * 1e-2)  # scale to 1e-2
+            loss_seg = self.criterions['seg'](pred_seg, gt_seg, valid_seg)
+            loss_j3d = self.criterions['j3d'](pred_j3d, gt_j3d, vis_j3d * 1e-2)  # scale to 1e-2
                 
-                # pred_hms = outputs['hms']
-                pred_seg = outputs['seg']
-                pred_eros = outputs['eros']
-                
-                gt_j3d = gt_j3d  * 1000 # scale to mm
-                pred_j3d = outputs['j3d'] * 1000 # scale to mm
-                pred_j3d_deltas = outputs['delta_j3d'] * 1000 # scale to mm
-                # initial_pose = self.initial_pose
-                # initial_j3d = initial_pose.cuda() * 1000
-
-                # all_gt_j3d = torch.cat([initial_j3d.unsqueeze(1), gt_j3d], dim=1)
-                all_gt_j3d = gt_j3d
-
-                gt_j3d_deltas = all_gt_j3d[:, 1:, :, :] - all_gt_j3d[:, :-1, :, :]
-
-            # dump_sketelon_image(test_gt_j3d, f"./visualizations/{10}_gt_j3d.png")
-
-            # with torch.amp.autocast('cuda', enabled=True):
-                loss_j3d_delta = self.criterions['delta_j3d'](pred_j3d_deltas, gt_j3d_deltas, vis_j3d * 1e-2)  # scale to 1e-2
-                loss_seg = self.criterions['seg'](pred_seg, gt_seg, valid_seg)
-                loss_j3d = self.criterions['j3d'](pred_j3d, gt_j3d, vis_j3d * 1e-2)  # scale to 1e-2
-                    
-                loss = loss_j3d_delta + loss_j3d + loss_seg
+            loss = loss_j3d_delta + loss_j3d + loss_seg
 
 
             # pred_j2d = get_j2d_from_hms(cfg, pred_hms)
 
-            pred_seg_detached = torch.sigmoid(pred_seg.detach().clone())
+            # pred_seg_detached = torch.sigmoid(pred_seg.detach().clone())
 
 
             avg_acc, cnt = accuracy(gt_j3d, pred_j3d, valid_j3d)
@@ -306,9 +301,9 @@ class EventEgoPoseEstimation(LightningModule):
             self.batch_time.update(time.time() - end)
             end = time.time()
 
-            representation = outputs['representation']
-            representation_image = create_image(representation)
-            pred_eros_image = create_image(pred_eros.detach())
+            # representation = outputs['representation']
+            # representation_image = create_image(representation)
+            # pred_eros_image = create_image(pred_eros.detach())
 
                 # TODO: save checkpoint - fix this later
                 # if batch_idx % 5000 == 0:
@@ -369,9 +364,9 @@ class EventEgoPoseEstimation(LightningModule):
                         gt_j3d = gt_j3d.detach()
                         pred_j3d = pred_j3d.detach()
                         gt_seg = gt_seg
-                        pred_seg_detached = pred_seg_detached
-                        pred_eros_image = pred_eros_image
-                        representation_image = representation_image
+                        # pred_seg_detached = pred_seg_detached
+                        # pred_eros_image = pred_eros_image
+                        # representation_image = representation_image
 
                         # save_debug_images(self, cfg, representation_image, meta, gt_hms, pred_hms, 'train', self.global_steps, n_images=n_images)
                         save_debug_3d_joints(self, cfg, inp, meta, gt_j3d, pred_j3d, 'train', global_step=self.global_steps)
@@ -382,23 +377,6 @@ class EventEgoPoseEstimation(LightningModule):
 
         except Exception as e:
             logger.info("Error in batch : {}".format(e))
-            failure_flag = torch.tensor([1.0], device=self.device)
-        
-        # Synchronize flags across all processes
-        dist.all_reduce(failure_flag, op=dist.ReduceOp.SUM)
-
-        # Manual optimization logic
-        if failure_flag.item() > 0:
-            loss = torch.tensor(0.010, requires_grad=True, device=self.device)
-            self.manual_backward(loss)
-            # Optionally: log or handle this case appropriately
-        else:
-            self.manual_backward(loss)
-            optimizer.step()
-
-            # Optionally, step the learning rate scheduler:
-            lr_scheduler = self.lr_schedulers()
-            lr_scheduler.step()
         
         return loss
 
@@ -504,31 +482,24 @@ class EventEgoPoseEstimation(LightningModule):
         self.j3d_loss_val.reset()
 
     def on_train_epoch_start(self):
-        self.j3d_delta_losses.reset()
-        self.j3d_losses.reset()
-        self.seg_losses.reset()
-        self.losses.reset()
-        self.acc.reset()
+        # self.j3d_delta_losses.reset()
+        # self.j3d_losses.reset()
+        # self.seg_losses.reset()
+        # self.losses.reset()
+        # self.acc.reset()
         self.batch_time.reset()
         self.data_time.reset()
 
     def configure_optimizers(self):
         optimizer = None
-        if cfg.TRAIN.OPTIMIZER == 'sgd':
-            optimizer = optim.SGD(
-                self.model.parameters(),
-                lr=self.lr,
-                momentum=cfg.TRAIN.MOMENTUM,
-                weight_decay=cfg.TRAIN.WD,
-                nesterov=cfg.TRAIN.NESTEROV
-            )
-        elif cfg.TRAIN.OPTIMIZER == 'adam':
-            optimizer = optim.Adam(
-                self.model.parameters(),
-                lr=self.lr
-            )
+
+        optimizer = optim.Adam(
+            self.model.parameters(),
+            lr=self.lr
+        )
 
         # TODO: check the LR decay epochs (currently not used)
+        lr_decay_epochs = list(self.lr_decay_epochs)
         lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(
         optimizer, self.lr_decay_epochs, cfg.TRAIN.LR_FACTOR
         )
