@@ -52,9 +52,12 @@ config.DATASET.BG_AUG = False
 # config.DATASET.TYPE = 'Real'
 # config.DATASET.BG_AUG = False
 
-config.DATASET.REAL_ROOT = '/CT/datasets07/nobackup/EE3D-R/Real_Dataset'
-config.DATASET.SYN_ROOT = '/CT/datasets07/nobackup/EE3D-S'
-config.DATASET.SYN_TEST_ROOT = '/CT/datasets07/nobackup/EE3D-S-Test'
+# config.DATASET.REAL_ROOT = '/CT/datasets07/nobackup/EE3D-R/Real_Dataset'
+config.DATASET.REAL_ROOT = '/scratch/inf0/user/mdeshmuk/EE3D-R'
+
+config.DATASET.SYN_ROOT = '/scratch/inf0/user/mdeshmuk/EE3D-S'
+config.DATASET.SYN_TEST_ROOT = '/scratch/inf0/user/mdeshmuk/EE3D-S-Test'
+
 config.DATASET.BACKGROUND_DATASET_ROOT = '/CT/datasets07/nobackup/EE3D-R/Background_Dataset'
 
 

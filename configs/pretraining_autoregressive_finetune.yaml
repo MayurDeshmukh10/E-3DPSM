@@ -36,7 +36,8 @@ model:
     workers: 14
 
 
-ckpt_path: /CT/EventEgo3Dv2/work/EventEgo3Dv2/results/delta_prediction_gpu20_autoregressive/version_1/checkpoints/epoch_epoch=04_step_step=130000.ckpt
+# ckpt_path: /CT/EventEgo3Dv2/work/EventEgo3Dv2/results/delta_prediction_gpu20_autoregressive/version_1/checkpoints/epoch_epoch=04_step_step=130000.ckpt
+ckpt_path: /CT/EventEgo3Dv2/work/EventEgo3Dv2/results/wandb_data/delta_prediction_gpu20_autoregressive_finetune/EventEgo3Dv2/2jq1djvx/checkpoints/epoch=8.ckpt
 
 trainer:
   accelerator: gpu
@@ -72,12 +73,12 @@ trainer:
   logger:
   - class_path: pytorch_lightning.loggers.WandbLogger
     init_args:
-      name: delta_prediction_gpu20_autoregressive_finetune  # Experiment name on wandb
+      name: delta_prediction_gpu20_autoregressive_finetune_2  # Experiment name on wandb
       project: EventEgo3Dv2  # Replace with your project name on wandb
-      save_dir: ./results/wandb_data/delta_prediction_gpu20_autoregressive_finetune  # Local directory to save wandb logs
+      save_dir: ./results/wandb_data/delta_prediction_gpu20_autoregressive_finetune_2  # Local directory to save wandb logs
       log_model: true  # Log the model checkpoints to wandb
       offline: false  # Set to true if you want to log offline and sync later
   - class_path: pytorch_lightning.loggers.TensorBoardLogger
     init_args:
       save_dir: ./results/
-      name: delta_prediction_gpu20_autoregressive_finetune  # TensorBoard experiment name
+      name: delta_prediction_gpu20_autoregressive_finetune_2  # TensorBoard experiment name
