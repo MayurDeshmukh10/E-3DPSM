@@ -12,3 +12,6 @@ og_results/
 dataset_splits_ssm_branch/
 EventEgoPoseEstimation/model/quantization_layer_init/
 lightning_logs/
+EE3D-S-images-pose_ung_120_19/
+EE3D-S-images/
+pose_111_18/

@@ -6,6 +6,7 @@ import random
 import logging
 import cv2
 import os
+import glob
 
 
 from EventEgoPoseEstimation.dataset.dataset_utils import h5py_File
@@ -37,55 +38,44 @@ class SyntheticEventStream(Dataset):
         self.max_frame_time = cfg.DATASET.SYNTHETIC.MAX_FRAME_TIME_IN_MS
         self.is_train = is_train
 
+        self.frame_offsets = np.load(f"/scratch/inf0/user/mdeshmuk/EE3D-S-frame-offsets/{self.data_path.name}.npy")
+        self.cumulative_offsets = np.insert(np.cumsum(self.frame_offsets), 0, 0)
+        self.num_frames = len(self.frame_offsets)
+
+        # self.index = 1
+
     def init_stream(self):
         self.fin = h5py_File(self.stream_path, 'r')['event']
         
-    def __len__(self):    
-        with h5py_File(self.stream_path, 'r') as f:
-            return f['event'].shape[0] // self.batch_size
-            # return f['event'].shape[0]
-        
-    
-    def get_event_batch(self, idx, num_events):
-        if self.is_train:
-            max_frame_time = random.randint(2, self.max_frame_time)
-        else:
-            max_frame_time = self.max_frame_time
-
-        frame_time = 0
-        data_batches = []           
-        while frame_time < max_frame_time: 
-            # import pdb; pdb.set_trace()
-            data_batch = self.fin[idx: idx + num_events]        
-            ts = data_batch[:, 2] 
-            
-            if not len(ts): 
-                break
-
-            ts = (ts[-1] - ts[0]) * 1e-3 # microseconds to milliseconds 
-
-            data_batches.append(data_batch)
-            
-            frame_time += ts
-            idx += num_events
-
-        # data_batches = self.fin
+    def __len__(self):
+        return self.num_frames // 10 # Take every 10th frame
+        # return len(self.frame_offsets)    
+        # with h5py_File(self.stream_path, 'r') as f:
+        #     return f['event'].shape[0] // self.batch_size
+        #     # return f['event'].shape[0]
 
 
-        if len(data_batches) == 0:
-            raise StopIteration
-        
-        data_batches_np = np.concatenate(data_batches, axis=0)
-        # data_batches_np = np.array(data_batches)
-    
-        del data_batches
+    def get_event_batch(self, frame_idx):
+        # print("__getitem__ Index: ", frame_idx)
 
-        return data_batches_np
+        # TODO: problem if frame_idx is 0 FIX THIS
+        start = self.cumulative_offsets[frame_idx]
+        end = self.cumulative_offsets[frame_idx + 1]
+        data_batch = self.fin[start:end]
+
+        # print("start", start)
+        # try:
+        #     print("Frame index", data_batch[-1, 4])
+        # except:
+        #     print("Problem")
+
+        return np.array(data_batch)
+
     
     def __getitem__(self, idx):
         if self.fin is None: self.init_stream() # Done to ensure multiprocessing works
 
-        data_batch = self.get_event_batch(idx * self.batch_size, self.batch_size)
+        data_batch = self.get_event_batch(idx)
         return data_batch
 
     def get_annoation(self, indexes):
