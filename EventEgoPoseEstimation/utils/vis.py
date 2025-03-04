@@ -285,23 +285,57 @@ def generate_skeleton_image(gt_j3d, pred_j3d):
     return color
 
 
-def dump_sketelon_image(j3d_joints, file_name):
-    skeleton = Skeleton((0.9, 0.1, 0.1))
-    node = None
+def dump_sketelon_image(gt_j3d, pred_j3d, file_name):
+    gt_j3d = gt_j3d.cpu().numpy()
+    pred_j3d = pred_j3d.cpu().numpy()
+    gt_skeleton = Skeleton((0.1, 0.9, 0.1)) # Green - RGB
+    pred_skeleton = Skeleton((0.9, 0.1, 0.1)) # Red - RGB
+
+    gt_node = None
     try:
-        mesh = skeleton.joints_2_trimesh(j3d_joints)    
-        mesh = pyrender.Mesh.from_trimesh(mesh)
-        node = pyrender.Node(mesh=mesh)
-        scene.add_node(node)
+        gt_mesh = gt_skeleton.joints_2_trimesh(gt_j3d)    
+        gt_mesh = pyrender.Mesh.from_trimesh(gt_mesh)
+        gt_node = pyrender.Node(mesh=gt_mesh)
+        scene.add_node(gt_node)
     except:
         traceback.print_exc()   
     
+    pred_node = None
+    try:
+        pred_mesh = pred_skeleton.joints_2_trimesh(pred_j3d)
+        pred_mesh = pyrender.Mesh.from_trimesh(pred_mesh)
+        pred_node = pyrender.Node(mesh=pred_mesh)
+        scene.add_node(pred_node)
+    except:
+        traceback.print_exc()
+
     color, depth = renderer.render(scene)
 
-    if node is not None:
-        scene.remove_node(node)
+    if gt_node is not None:
+        scene.remove_node(gt_node)
+    
+    if pred_node is not None:
+        scene.remove_node(pred_node)
 
-    cv2.imwrite(file_name, color)
+    return color
+    # cv2.imwrite(file_name, color)
+
+    # skeleton = Skeleton((0.9, 0.1, 0.1))
+    # node = None
+    # try:
+    #     mesh = skeleton.joints_2_trimesh(j3d_joints)    
+    #     mesh = pyrender.Mesh.from_trimesh(mesh)
+    #     node = pyrender.Node(mesh=mesh)
+    #     scene.add_node(node)
+    # except:
+    #     traceback.print_exc()   
+    
+    # color, depth = renderer.render(scene)
+
+    # if node is not None:
+    #     scene.remove_node(node)
+
+    # cv2.imwrite(file_name, color)
 
 
 
@@ -557,6 +591,59 @@ def visualize_temporal_bins(event_tensor, output_path):
         # output_path = os.path.join(output_dir, f"channel_{i + 1}.png")
         cv2.imwrite(f"{output_path}/temporal_{i + 1}.png", rgb_image)
         # image.save(f"{output_path}/temporal_{i + 1}.png")
+
+import matplotlib.pyplot as plt
+def save_pose_images(pred_poses_2d, gt_poses_2d, output_folder, mask_images=None):
+    """
+    Save pose images by plotting predicted and ground truth keypoints.
+    
+    Args:
+        pred_poses_2d (torch.Tensor or np.ndarray): Tensor of shape [B, T, 16, 2].
+        gt_poses_2d (torch.Tensor or np.ndarray): Tensor of shape [B, T, 16, 2].
+        output_folder (str): Directory where images will be saved.
+        mask_image (np.ndarray, optional): Background image of shape [H, W, 3]. 
+            If None, a white background is used.
+    """
+    # Ensure output folder exists
+    os.makedirs(output_folder, exist_ok=True)
+
+    # If tensors, convert to numpy arrays
+    if isinstance(pred_poses_2d, torch.Tensor):
+        pred_poses_2d = pred_poses_2d.cpu().numpy()
+    if isinstance(gt_poses_2d, torch.Tensor):
+        gt_poses_2d = gt_poses_2d.cpu().numpy()
+
+    B, T, num_points, coord = pred_poses_2d.shape  # e.g. 10,6,16,2
+
+    for b in range(B):
+        for t in range(T):
+            fig, ax = plt.subplots(figsize=(6,6))
+
+            mask_image = mask_images[b, t, :, :].squeeze(0)
+            
+            # Use provided mask_image if available, else set white background.
+            if mask_image is not None:
+                ax.imshow(mask_image, cmap='gray')
+            else:
+                ax.set_facecolor('white')
+            
+            # Extract the 16x2 keypoint arrays for the current batch and time
+            pred_points = pred_poses_2d[b, t, :, :]  # shape: (16, 2)
+            gt_points = gt_poses_2d[b, t, :, :]        # shape: (16, 2)
+            
+            # Plot ground truth points in blue (circles) and predictions in red (x markers)
+            ax.scatter(gt_points[:, 0], gt_points[:, 1], c='blue', label='GT', s=40)
+            ax.scatter(pred_points[:, 0], pred_points[:, 1], c='red', label='Pred', s=40, marker='x')
+            
+            ax.legend()
+            ax.set_title(f'Batch {b}, Time {t}')
+            ax.axis('off')  # Optionally turn off the axis
+            
+            # Save image
+            save_path = os.path.join(output_folder, f'pose_img_{b}_{t}.png')
+            plt.savefig(save_path, bbox_inches='tight')
+            plt.close(fig)
+
 
 def main():
     import open3d as o3d

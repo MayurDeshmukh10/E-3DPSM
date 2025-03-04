@@ -9,22 +9,8 @@ model:
       input_channel: 20 #36 (works well in vis) #18 #12 #18
       posenet_input_channel: 20
       image_size: [256, 192]
-      batch_size: 6 #16 # 9 # individual batch size
-      #heatmap_size: [config.MODEL.IMAGE_SIZE[0] // config.MODEL.HEAT_MAP_SCALE, config.MODEL.IMAGE_SIZE[1] // config.MODEL.HEAT_MAP_SCALE] TODO: fix this
-    
-    # dataset_cfg:
-    #   dataset_type: synthetic # real, synthetic
-    #   bg_aug: false
-    #   real_root: /CT/datasets07/nobackup/EE3D-R/Real_Dataset
-    #   syn_root: /CT/datasets07/nobackup/EE3D-S
-    #   syn_test_root: /CT/datasets07/nobackup/EE3D-S-Test
-    #   background_dataset_root: /CT/datasets07/nobackup/EE3D-R/Background_Dataset
-    #   scale_factor: 0.2
-    #   flip: true
-    #   rot_factor: 3
+      batch_size: 4 #16 # 9 # individual batch size
 
-    #   representaton: RawEvent
-    #   event_batch_size: 4096
     lr: 0.001
     lr_decay_epochs:
       - 5 #10
@@ -43,13 +29,13 @@ model:
     use_bg_augmentation: true
     temporal_steps: 20
     sample_step: 10
-    batch_size: 6
+    batch_size: 4
     workers: 14
 
 
-
-ckpt_path: /CT/EventEgo3Dv2/work/EventEgo3Dv2/results/wandb_data/pretraining_new_dataloader_oom_fixed_5/EventEgo3Dv2/a48pwu92/checkpoints/epoch=6.ckpt
 # ckpt_path: /CT/EventEgo3Dv2/work/EventEgo3Dv2/results/wandb_data/pretraining_new_dataloader_oom_fixed_5_1/EventEgo3Dv2/ha8vz1xf/checkpoints/epoch=9.ckpt
+ckpt_path: /CT/EventEgo3Dv2/work/EventEgo3Dv2/results/wandb_data/pretraining_new_dataloader_oom_fixed_5_1/EventEgo3Dv2/ha8vz1xf/checkpoints/epoch=9.ckpt
+
 
 trainer:
   accelerator: gpu
@@ -104,4 +90,4 @@ trainer:
   - class_path: pytorch_lightning.loggers.TensorBoardLogger
     init_args:
       save_dir: ./results/
-      name: test  # TensorBoard experiment name
+      name: pretraining_new_dataloader_evaluate_window_100msec_ts20  # TensorBoard experiment name

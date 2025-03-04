@@ -10,7 +10,7 @@ config = edict()
 
 # debug
 config.DEBUG = edict()
-config.DEBUG.NO_MP = True
+config.DEBUG.NO_MP = False
 config.DEBUG.DEBUG = False
 config.DEBUG.TRAIN_SET_ONLY = False
 config.DEBUG.SAVE_BATCH_IMAGES_GT = True
@@ -42,21 +42,24 @@ config.MODEL.CHECKPOINT_PATH = os.getenv('CHECKPOINT_PATH', '')
 # DATASET related params
 config.DATASET = edict()
 
-config.DATASET.TEMPORAL_STEPS = 1
+config.DATASET.TEMPORAL_STEPS = 10
 config.TRAIN_ITERATIONS_PER_EPOCH = 10000
 config.TEST_ITERATIONS_PER_EPOCH = 10000
 
 config.DATASET.TYPE = 'Synthetic'
-config.DATASET.BG_AUG = False
+config.DATASET.BG_AUG = True
 
 # config.DATASET.TYPE = 'Real'
 # config.DATASET.BG_AUG = False
 
-# config.DATASET.REAL_ROOT = '/CT/datasets07/nobackup/EE3D-R/Real_Dataset'
-config.DATASET.REAL_ROOT = '/scratch/inf0/user/mdeshmuk/EE3D-R'
+config.DATASET.REAL_ROOT = '/CT/datasets07/nobackup/EE3D-R/Real_Dataset'
+# config.DATASET.REAL_ROOT = '/scratch/inf0/user/mdeshmuk/EE3D-R'
 
-config.DATASET.SYN_ROOT = '/scratch/inf0/user/mdeshmuk/EE3D-S'
-config.DATASET.SYN_TEST_ROOT = '/scratch/inf0/user/mdeshmuk/EE3D-S-Test'
+# config.DATASET.SYN_ROOT = '/scratch/inf0/user/mdeshmuk/EE3D-S'
+# config.DATASET.SYN_TEST_ROOT = '/scratch/inf0/user/mdeshmuk/EE3D-S-Test'
+
+config.DATASET.SYN_ROOT = '/CT/datasets07/nobackup/EE3D-S'
+config.DATASET.SYN_TEST_ROOT = '/CT/datasets07/nobackup/EE3D-S-Test'
 
 config.DATASET.BACKGROUND_DATASET_ROOT = '/CT/datasets07/nobackup/EE3D-R/Background_Dataset'
 
@@ -78,11 +81,11 @@ config.DATASET.ENSEMBLE_DATASETS = [
 # config.DATASET.REPRESENTATION = 'LNES'
 config.DATASET.REPRESENTATION = 'RawEvent'
 
-config.DATASET.EVENT_BATCH_SIZE = 8192
+config.DATASET.EVENT_BATCH_SIZE =  8192 #16384 #8192  # 8192
 # config.DATASET.EVENT_BATCH_SIZE = 4096
 
-config.DATASET.REAL.MAX_FRAME_TIME_IN_MS = 300 #100
-config.DATASET.SYNTHETIC.MAX_FRAME_TIME_IN_MS = 50 #100
+config.DATASET.REAL.MAX_FRAME_TIME_IN_MS = 15 #300 #100
+config.DATASET.SYNTHETIC.MAX_FRAME_TIME_IN_MS = 20 #33 #33 #100
 # config.DATASET.REAL.MAX_FRAME_TIME_IN_MS = 5
 # config.DATASET.SYNTHETIC.MAX_FRAME_TIME_IN_MS = 3
 config.DATASET.SYNTHETIC.RETURN_RGB = False

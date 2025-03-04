@@ -1,11 +1,11 @@
 import torch
 from torch import nn
 from torch.nn import functional as F
-from .blazepose import BlazePose
 from .base import Event3DPoseNet
 from os.path import join, dirname, isfile
 import numpy as np
 from EventEgoPoseEstimation.utils.vis import visualize_temporal_bins
+from EventEgoPoseEstimation.dataset.dataset_utils import event_augmentation, save_augmented_data
 
 
 class ValueLayer(nn.Module):
@@ -100,35 +100,43 @@ class QuantizationLayer(nn.Module):
         B = len(events_list)
 
         num_voxels = int(2 * np.prod(self.dim) * B)
-        vox = events_list[0][0].new_full([num_voxels,], fill_value=0)
+        # vox = events_list[0][0].new_full([num_voxels,], fill_value=0)
+        vox = torch.zeros(num_voxels, device=device)
 
         C, H, W = self.dim
 
-        x_values = [events[:, 0] for events in events_list]
-        y_values = [events[:, 1] for events in events_list]
-        t_values = [events[:, 2] for events in events_list]
-        p_values = [events[:, 3] for events in events_list]
-        b_values = [i * torch.ones((len(events)), device=device) for i, events in enumerate(events_list)]
+        # x_values = [events[:, 0] for events in events_list]
+        # y_values = [events[:, 1] for events in events_list]
+        # t_values = [events[:, 2] for events in events_list]
+        # p_values = [events[:, 3] for events in events_list]
+        # b_values = [i * torch.ones((len(events)), device=device) for i, events in enumerate(events_list)]
         
 
-        x = torch.cat(x_values, dim=0)
-        y = torch.cat(y_values, dim=0)
-        t = torch.cat(t_values, dim=0)
-        p = torch.cat(p_values, dim=0)
-        b = torch.cat(b_values, dim=0)
+        # x = torch.cat(x_values, dim=0)
+        # y = torch.cat(y_values, dim=0)
+        # t = torch.cat(t_values, dim=0)
+        # p = torch.cat(p_values, dim=0)
+        # b = torch.cat(b_values, dim=0)
 
-        p = (p+1)/2  # maps polarity to 0, 1
+        # p = (p+1)/2  # maps polarity to 0, 1
 
-        x_idx = x
-        y_idx = W * y
-        
-        # x_idx = W * x             # Maps height (x) to row offsets
-        # y_idx = y                 # Maps width (y)
-        channel_offset = W * H * C * p
-        batch_offset = W * H * C * 2 * b
+        # x_idx = x
+        # y_idx = W * y
+        # channel_offset = W * H * C * p
+        # batch_offset = W * H * C * 2 * b
 
-        # Summing to get final index
-        idx_before_bins = x_idx + y_idx + channel_offset + batch_offset
+        # # Summing to get final index
+        # idx_before_bins = x_idx + y_idx + channel_offset + batch_offset
+
+        x = torch.cat([events[:, 0] for events in events_list], dim=0)
+        y = torch.cat([events[:, 1] for events in events_list], dim=0)
+        t = torch.cat([events[:, 2] for events in events_list], dim=0)
+        p = torch.cat([(events[:, 3] + 1) / 2 for events in events_list], dim=0)  # Map polarity to 0, 1
+        b = torch.cat([i * torch.ones(len(events), device=device) for i, events in enumerate(events_list)], dim=0)
+
+        # Precompute base indices components
+        idx_before_bins = (x + W * y + (W * H * C) * p + (W * H * C * 2) * b)
+        wh = W * H  # Precompute to avoid repeated calculation
 
         # Loop through bins to compute values and accumulate in voxel grid
         for i_bin in range(C):
@@ -144,45 +152,13 @@ class QuantizationLayer(nn.Module):
                 idx = idx.clamp(0, num_voxels - 1)  # Clamp values within bounds
 
             # Accumulate values in the voxel grid
-            vox.put_(idx.long(), values, accumulate=True)
+            # vox.put_(idx.long(), values, accumulate=True)
+            vox.scatter_add_(0, idx.long(), values)
 
         vox = vox.view(-1, 2, C, H, W)
         vox = torch.cat([vox[:, 0, ...], vox[:, 1, ...]], 1)
 
         return vox
-
-class ConfidenceNetwork(nn.Module):
-    def __init__(self):
-        super(ConfidenceNetwork, self).__init__()
-
-        self.network = nn.Sequential(
-            nn.Conv2d(1, 16, 3, stride=1, padding=3//2),
-            nn.PReLU(),
-            nn.Conv2d(16, 32, 3, stride=1, padding=3//2),
-            nn.PReLU(),
-            nn.Conv2d(32, 64, 3, stride=1, padding=3//2),
-            nn.PReLU(),
-            nn.Conv2d(64, 1, 1, stride=1, padding=0, bias=False), 
-        )
-
-    def forward(self, key):
-        confidence = self.network(key)
-       
-        return torch.sigmoid(key.detach() * confidence)
-
-
-def crop_and_resize_to_resolution(x, output_resolution=(224, 224)):
-        B, C, W, H = x.shape
-        if H > W:
-            h = H // 2
-            x = x[:, :, h - W // 2:h + W // 2, :]
-        else:
-            h = W // 2
-            x = x[:, :, :, h - H // 2:h + H // 2]
-
-        x = F.interpolate(x, size=output_resolution)
-
-        return x
 
 class EROS(nn.Module):
     def  __init__(self, inp_chn, width, height, batch_size) -> None:
@@ -194,12 +170,10 @@ class EROS(nn.Module):
             activation=nn.LeakyReLU(negative_slope=0.1),
             batch_size=batch_size
         )
-        
-        self.confidence_network = ConfidenceNetwork()
         self.width = width
         self.height = height
         
-    def forward(self, buffer, events, key, device):
+    def forward(self, events, device):
         events_list = []
         for i, event_batch in enumerate(events):
             valid_mask = ~(event_batch == -10).all(dim=1) # remove invalid events
@@ -210,26 +184,11 @@ class EROS(nn.Module):
 
         # visualize_temporal_bins(quantized_events[0], '/CT/EventEgo3Dv2/work/EventEgo3Dv2/visualizations/test/28')
 
-        # quantized_events = crop_and_resize_to_resolution(quantized_events, (self.height, self.width))
-        _, _, height, width = quantized_events.shape
-            
-        # confidence = self.confidence_network(key) 
-
-        # confidence = F.interpolate(confidence, size=(height, width), mode='bilinear', align_corners=False)
-        # confidence = F.interpolate(confidence, size=(inp.shape[2], inp.shape[3]), mode='bilinear', align_corners=False)
-
-        # try:
-        # TODO: Visualize this after applying the confidence
-        # TODO: Does it make sense to apply confidence of (1, 192, 256) to all bins (18, 192, 256)
-        # out = buffer * confidence + quantized_events
         out = quantized_events
-
-
         old_min, old_max, new_min, new_max = out.min(), out.max(), 0, 1
         out = (out - old_min) * (new_max - new_min) / (old_max - old_min) + new_min
 
-        # return out, confidence, buffer, quantized_events
-        return out, buffer, quantized_events.clone().detach()
+        return out
 
 
 class EgoHPE(nn.Module):
@@ -258,98 +217,78 @@ class EgoHPE(nn.Module):
         self.enable_eros = eros
         self.inp_chn = input_channel
         self.width, self.height = image_size
-        # self.hm_width, self.hm_height = config.heatmap_size
         self.hm_width, self.hm_height = config.MODEL.HEATMAP_SIZE
 
         self.batch_size = batch_size
 
         self.EROS = EROS(inp_chn=self.num_bins, height=self.height, width=self.width, batch_size=self.batch_size)
-        
-    def forward(self, x, prev_buffer=None, prev_key=None, batch_first=False, device='cuda'):
 
-        buffer = prev_buffer
 
-        prev_states = None
+    def forward(self, x, augmentation_data, device='cuda'):
+
+        s5_state = None
+        pose = None
 
         T, B, N, C = x.shape
-        
-        if buffer is None:
-            # buffer = torch.zeros_like(x[0, :, :, :, :])
-            buffer = torch.zeros(self.batch_size, self.inp_chn, self.height, self.width, device=device)
-        
-        key = prev_key
-
-        if key is None:
-            key = torch.ones(self.batch_size, 1, self.hm_height, self.hm_width, device=device)
-
-                    
-        eross = []
-        delta_j3ds = []
-        j3ds = []
+      
+        delta_poses = []
+        poses = []
         seg_outs = []
+        heatmaps = []
+        s5_states = []
+        voxel_outs = []
 
-        # confidences = []
-        buffers = []
-        # states_store = []
-
+        # iterate over temporal steps
         for i in range(T):
-            if self.enable_eros:
-                out, buffer, representation = self.EROS(buffer, x[i], key, device)
-            else:
-                out = x[i]
 
-            buffers.append(buffer)
-            # confidences.append(confidence)
-     
-            outs = self.event_3d_posenet(out, prev_states)
-            
-            prev_states = outs['prev_states']
+            # discretize raw events into voxel grid (20 x 192 x 256)
+            out = self.EROS(x[i], device)
 
-            # states_store.append(outs['states_store'])
+            if not all(is_empty(inner) for sublist in augmentation_data['bg_data'] for inner in sublist):
+                out = event_augmentation(self, out, i, augmentation_data)
 
-            # buffer = out
+            # for ii, o in enumerate(out):
+            #     visualize_temporal_bins(o.detach(), f'/CT/EventEgo3Dv2/work/EventEgo3Dv2/visualizations/augmented_data_flow/{ii}.png')
+            #     visualize_temporal_bins(out_copy[ii].detach(), f'/CT/EventEgo3Dv2/work/EventEgo3Dv2/visualizations/augmented_data_flow/og_{ii}.png')
+            #     save_augmented_data(o.detach(), f'/CT/EventEgo3Dv2/work/EventEgo3Dv2/visualizations/augmented_data_flow/sum_{ii}.png')
+            #     save_augmented_data(out_copy[ii].detach(), f'/CT/EventEgo3Dv2/work/EventEgo3Dv2/visualizations/augmented_data_flow/sum_og_{ii}.png')
 
-            # x_hms = outs['hms']
-            j3d = outs['j3d']
+            outs = self.event_3d_posenet(out, s5_state, pose, first_temporal_step=(i == 0))
 
-            delta_j3d = outs['delta_j3d']
-                                    
+            s5_state = outs['s5_state'].detach()
+            pose = outs['pose']
+            delta_pose = outs['delta_pose']
             seg_out = outs['seg']
             seg_feature = outs['seg_feature']
-            
-            key = seg_feature
-            
-            eross.append(buffer)
-            delta_j3ds.append(delta_j3d)
-            j3ds.append(j3d)
+            heatmap = outs['heatmaps']
+            if delta_pose is not None:
+                delta_poses.append(delta_pose)
+            poses.append(pose)
+            # s5_states.append(s5_state)
             seg_outs.append(seg_out)
+            heatmaps.append(heatmap)
+            voxel_outs.append(out)
 
-        if prev_buffer is not None:
-            prev_buffer.copy_(buffer)
-            
-        if prev_key is not None:
-            prev_key.copy_(key)
-
-        eross = torch.cat(eross, dim=0)
-        j3ds = torch.cat(j3ds, dim=0)
-        seg_outs = torch.cat(seg_outs, dim=0)
-         
-        # confidences = torch.cat(confidences, dim=0)
-        buffers = torch.cat(buffers, dim=0)     
-        delta_j3ds = torch.cat(delta_j3ds, dim=0)  
+        abs_poses = torch.stack(poses)
+        if len(delta_poses) > 0:
+            delta_poses = torch.stack(delta_poses)
+        seg_outs = torch.stack(seg_outs)
+        heatmaps = torch.stack(heatmaps)
+        voxel_representations = torch.stack(voxel_outs)
+        # s5_states = torch.stack(s5_states)
         
         outputs = {}
-        outputs['j3d'] = j3ds  
-        
-        outputs['eros'] = eross
+        outputs['abs_poses'] = abs_poses  
         outputs['seg'] = seg_outs
- 
-        # outputs['confidence'] = confidences
-        outputs['buffer'] = buffers
-        outputs['representation'] = representation
-        outputs['prev_states'] = prev_states
-        outputs['delta_j3d'] = delta_j3ds
-        # outputs['states_store'] = states_store
+        outputs['delta_poses'] = delta_poses
+        outputs['heatmaps'] = heatmaps
+        outputs['voxel_representations'] = voxel_representations
+        # outputs['s5_states'] = s5_states
  
         return outputs
 
+def is_empty(item):
+    if isinstance(item, torch.Tensor):
+        return item.numel() == 0  # True if the tensor has zero elements
+    else:
+        return len(item) == 0     # Works for lists and other sequences
