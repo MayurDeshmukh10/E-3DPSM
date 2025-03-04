@@ -13,7 +13,7 @@ from EventEgoPoseEstimation.dataset.egoevent_real import RealEventStream
 from EventEgoPoseEstimation.dataset.dataset_utils import generate_path_split, generate_indices
 
 
-def get_representation(cfg, width, height, temporal_bins):
+def get_representation(cfg, width, height, temporal_bins, augmentation):
     representation = cfg.DATASET.REPRESENTATION
     
     if representation == 'EROS':
@@ -24,7 +24,7 @@ def get_representation(cfg, width, height, temporal_bins):
     elif representation == 'EventFrame':
         repr = EventFrame(cfg, height, width)
     elif representation == 'RawEvent':
-        repr = RawEvent(cfg, height, width, temporal_bins)
+        repr = RawEvent(cfg, height, width, temporal_bins, augmentation)
     else:
         raise NotImplementedError
 
@@ -42,62 +42,64 @@ class SingleSequenceDataset(Joints3DDataset):
         valid_seg_list = []
         ego_to_global_space_list = []
         # for i in range(self.temporal_bins):
-        for i in range(len(item['ego_j3d'])):
-            if item['ego_to_global_space'] is None:
-                ego_to_global_space = None
-            else:
-                ego_to_global_space = item['ego_to_global_space'][i]
-            j3d = item['ego_j3d'][i]
-            j2d = item['ego_j2d'][i]
-            segmentation_mask = item['segmentation_mask'][i]
-            if type(item['valid_seg']) == bool:
-                valid_seg = item['valid_seg']
-            else:
-                valid_seg = item['valid_seg'][i]
-            rgb_frame_index = item['rgb_frame_index'][i]
+        # for i in range(len(item['ego_j3d'])):
 
-            if j3d is None or j2d is None:
-                vis_j2d = np.zeros((self.num_joints, 2))
-                vis_j3d = np.zeros((self.num_joints, 3))
-                j3d = np.ones((self.num_joints, 3)) * -1
-                j2d = np.ones((self.num_joints, 2)) * -1
-            else:
-                vis_j2d = np.ones_like(j2d)
-                vis_j3d = np.ones_like(j3d)
+        if item['ego_to_global_space'] is None:
+            ego_to_global_space = None
+        else:
+            ego_to_global_space = item['ego_to_global_space']
+        j3d = item['ego_j3d']
+        j2d = item['ego_j2d']
+        segmentation_mask = item['segmentation_mask']
+        if type(item['valid_seg']) == bool:
+            valid_seg = item['valid_seg']
+        else:
+            valid_seg = item['valid_seg']
+        rgb_frame_index = item['rgb_frame_index']
 
-            if ego_to_global_space is None:
-                ego_to_global_space = np.eye(4)
+        if j3d is None or j2d is None:
+            vis_j2d = np.zeros((self.num_joints, 2))
+            vis_j3d = np.zeros((self.num_joints, 3))
+            j3d = np.ones((self.num_joints, 3)) * -1
+            j2d = np.ones((self.num_joints, 2)) * -1
+        else:
+            vis_j2d = np.ones_like(j2d)
+            vis_j3d = np.ones_like(j3d)
 
-            rgb_indexes.append(int(rgb_frame_index))
-            ego_j3ds.append(j3d.astype(np.float32))
-            ego_j2ds.append(j2d.astype(np.float32))
-            segmentation_masks.append(segmentation_mask)
-            valid_seg_list.append(valid_seg)
-            vis_j2ds.append(vis_j2d.astype(np.float32))
-            vis_j3ds.append(vis_j3d.astype(np.float32))
-            ego_to_global_space_list.append(ego_to_global_space)
+        if ego_to_global_space is None:
+            ego_to_global_space = np.eye(4)
+
+        # rgb_indexes.append(int(rgb_frame_index))
+        # ego_j3ds.append(j3d.astype(np.float32))
+        # ego_j2ds.append(j2d.astype(np.float32))
+        # segmentation_masks.append(segmentation_mask)
+        # valid_seg_list.append(valid_seg)
+        # vis_j2ds.append(vis_j2d.astype(np.float32))
+        # vis_j3ds.append(vis_j3d.astype(np.float32))
+        # ego_to_global_space_list.append(ego_to_global_space)
 
 
         return {
-                'valid_seg': valid_seg_list,
-                'j2d': ego_j2ds,
-                'j3d': ego_j3ds,	
-                'vis_j2d': vis_j2ds,
-                'vis_j3d': vis_j3ds,
-                'segmentation_mask': segmentation_masks,
-                'ego_to_global_space': ego_to_global_space_list,
-                'rgb_frame_index': rgb_indexes
+                'valid_seg': valid_seg,
+                'j2d': j2d.astype(np.float32),
+                'j3d': j3d.astype(np.float32),	
+                'vis_j2d': vis_j2d.astype(np.float32),
+                'vis_j3d': vis_j3d.astype(np.float32),
+                'segmentation_mask': segmentation_mask,
+                'ego_to_global_space': ego_to_global_space,
+                'rgb_frame_index': int(rgb_frame_index)
             }
     
-    def __init__(self, cfg, data_path, is_train, temporal_bins):
+    def __init__(self, cfg, data_path, is_train, split, temporal_bins, augmentation=False):
         super().__init__(cfg, data_path, is_train, temporal_bins)
 
         if cfg.DATASET.TYPE == 'Synthetic':
-            dataset = SyntheticEventStream(data_path, cfg, is_train)
+            dataset = SyntheticEventStream(data_path, cfg, split, is_train, augmentation)
         else:
-            dataset = RealEventStream(data_path, cfg, is_train)
+            dataset = RealEventStream(data_path, cfg, split, is_train, augmentation)
         
         self.data_path = data_path
+        self.split = split
 
         self.dataset = dataset
         width, height = dataset.width, dataset.height
@@ -108,9 +110,11 @@ class SingleSequenceDataset(Joints3DDataset):
 
         self.temporal_bins = temporal_bins
 
-        self.repr = get_representation(cfg, width, height, temporal_bins)
+        self.repr = get_representation(cfg, width, height, temporal_bins, augmentation)
 
         self.visualize = self.repr.visualize
+
+        print("Loading data for split : ", self.split)
         print(f'{data_path} => load {len(self.dataset)} samples')
 
         self.is_train = is_train
@@ -127,17 +131,17 @@ class SingleSequenceDataset(Joints3DDataset):
         else:
             kwargs = {}
                 
-        data_batch = self.dataset[idx]
+        data_batch, pose_filename = self.dataset[idx, kwargs]
                 
         if len(data_batch) == 0:
             raise StopIteration
 
-        if self.is_train:
-            dist = np.random.uniform(0.2, 1.0)
-            n_events = data_batch.shape[0]
-            choice_len = np.random.randint(int(n_events * dist), n_events)
-            choices = np.random.choice(np.arange(n_events), choice_len, replace=False)
-            data_batch = data_batch[choices, :]
+        # if self.is_train:
+        #     dist = np.random.uniform(0.2, 1.0)
+        #     n_events = data_batch.shape[0]
+        #     choice_len = np.random.randint(int(n_events * dist), n_events)
+        #     choices = np.random.choice(np.arange(n_events), choice_len, replace=False)
+        #     data_batch = data_batch[choices, :]
 
         data = self.repr(data_batch)
         # frame_index = data['frame_index']
@@ -145,6 +149,7 @@ class SingleSequenceDataset(Joints3DDataset):
 
         anno = self.dataset.get_annoation(frame_indexes)
         anno = self.prepare_anno(anno)
+        anno['pose_filename'] = pose_filename
 
         return self.transform(data, anno, kwargs)
 
@@ -161,7 +166,9 @@ class EgoEvent(Dataset):
         if cfg.DATASET.TYPE == 'Synthetic':
             dataset_root = Path(cfg.DATASET.SYN_ROOT)
             # TODO: get this path from config
-            split_root_path = Path("/CT/EventEgo3Dv2/work/EventEgo3Dv2/dataset_splits/Synthetic")
+            split_root_path = dataset_root
+            test_path = Path("/CT/EventEgo3Dv2/work/EventEgo3Dv2/dataset_splits/test")
+            # split_root_path = Path("/CT/EventEgo3Dv2/work/EventEgo3Dv2/dataset_splits/test")
 
         else:
             dataset_root = Path(cfg.DATASET.REAL_ROOT)
@@ -178,7 +185,7 @@ class EgoEvent(Dataset):
         elif split == 'val':
             split_path = split_root_path / 'val.txt'
         elif split == 'test':
-            split_path = split_root_path / 'test.txt'
+            split_path = test_path / 'test.txt'
             
         with open(split_path, 'r') as f:
             self.items = f.read().splitlines()
@@ -193,7 +200,7 @@ class EgoEvent(Dataset):
         datasets = list()
         for item in self.items:
             data_path = dataset_root / item
-            dataset = SingleSequenceDataset(cfg, data_path, is_train, temporal_bins=temporal_bins)
+            dataset = SingleSequenceDataset(cfg, data_path, is_train, split, temporal_bins=temporal_bins)
             if dataset.isvalid():
                 self.visualize = dataset.visualize
                 datasets.append(dataset)

@@ -6,65 +6,48 @@ from EventEgoPoseEstimation.dataset import transforms
 from configs.settings import config
 
 class TemoralWrapper(Dataset):
-    def __init__(self, dataset, timesteps, augment) -> None:
+    def __init__(self, dataset, timesteps, split, sample_step) -> None:
         super().__init__()
 
         self.dataset = dataset
         self.timesteps = timesteps
-        self.augment = augment  
-
-    def get_random_transform(self):
-        target_width, target_height = config.MODEL.IMAGE_SIZE
-        
-        center_shift_x = target_width / 2 + target_width * 0.1 * random.uniform(-1, 1)
-        center_shift_y = target_height / 2 + target_height * 0.1 * random.uniform(-1, 1)
-        center = np.array([center_shift_x, center_shift_y])
-        scale = 1 + random.uniform(-1, 1) * config.DATASET.SCALE_FACTOR
-        rot = random.uniform(-1, 1) * config.DATASET.ROT_FACTOR
-        
-        output_size = np.array((target_width, target_height))
-
-        A = transforms.get_affine_transform(center, scale, rot, output_size)
-
-        return A
-    
-    def get_random_flip_lr(self):
-        if random.random() < 0.5:
-            flip = True
-        else:
-            flip = False
-        return flip
-    
-    def get_random_flip_axis(self):
-        if random.random() < 0.5:
-            flip = True
-        else:
-            flip = False
-        return flip
+        self.sample_step = sample_step
+        self.split = split
     
     def __len__(self):
-        return len(self.dataset)
+        if self.split == 'train':
+            return len(self.dataset) // self.sample_step
+        else:
+            return len(self.dataset)
     
     def __getitem__(self, idx):
-        start_index = max(0, idx - self.timesteps)
-        end_index = idx
+
+        if self.split == 'train':
+            real_idx = idx * self.sample_step
+        else:
+            real_idx = idx
+
+        start_index = max(0, real_idx - self.timesteps)
+        # start_index = max(0, anchor - (self.timesteps - 1) * 10)
+        end_index = real_idx
         
         end_index += self.timesteps - (end_index - start_index)
 
-        kwargs = {'start_index': idx}
-        if self.augment:
-            kwargs['augment'] = True	
-        
-            # kwargs['A'] = self.get_random_transform()
-            # kwargs['flip_lr'] = self.get_random_flip_lr()
-
-            kwargs['flip_axis'] = self.get_random_flip_axis()    
-            
+        kwargs = {}
+    
         data = []
-        for i in range(start_index, end_index): 
-            kwargs['offset_index'] = i - start_index
-            data.append(self.dataset[i, kwargs])
+        # print(f"start_index: {start_index}, end_index: {end_index}")
+        # count = 0
+        for i in range(start_index, end_index):
+            # if i is first then
+            # if count == 0:
+            #     kwargs['first_step'] = True
+            # else:
+            #     kwargs['first_step'] = False
             
+            data.append(self.dataset[i, kwargs])
+            # count += 1
+
         return data
 
     def visualize(self, *args, **kwargs):

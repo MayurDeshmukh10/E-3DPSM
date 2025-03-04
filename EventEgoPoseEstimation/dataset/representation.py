@@ -325,13 +325,18 @@ def interpolate_missing_bins(bin_frame_indices, missing_value=-1):
     return bin_frame_indices
 
 class RawEvent:
-    def __init__(self, cfg, height, width, temporal_bins):
+    def __init__(self, cfg, height, width, temporal_bins, augmentation):
         self.height = height
         self.width = width
+
+        self.augmentation = augmentation
 
         self.resize_transform = ResizeTransform(cfg, height, width)
 
         self.temporal_bins = temporal_bins
+
+        lnes_config = cfg.DATASET.LNES
+        self.windows_time_ms = lnes_config.WINDOWS_TIME_MS
 
     def __call__(self, data_batch) -> Any:
         if data_batch.shape[-1] == 6:
@@ -342,61 +347,73 @@ class RawEvent:
             xs, ys, ts, ps = data_batch.T
         else:
             raise ValueError('Invalid data_batch shape')
+        
 
-        ts_min = ts.min()
-        ts_max = ts.max()
-        ts_range = ts_max - ts_min
+        if self.augmentation:
+            ts = ts.astype(np.float32)
+        
+            ts = (ts[-1] - ts) * 1e-3 # microseconds to milliseconds 
+            
+            selected_indices = ts < self.windows_time_ms
 
-        if ts_range == 0:
-            ts = ts - ts_min
+            xs = xs[selected_indices]
+            ys = ys[selected_indices]
+            ts = ts[selected_indices]
+            ps = ps[selected_indices].astype(np.int32)
+
+            if data_batch.shape[-1] == 6:
+                segmentation = segmentation[selected_indices]
+
+            xs, ys = self.resize_transform(xs, ys)
+            width, height = self.resize_transform.width, self.resize_transform.height
+
+            xs = xs.astype(np.int32)
+            ys = ys.astype(np.int32)
+
+            events_tensor = np.zeros((height, width, 2))
+            events_tensor[ys, xs, ps] = 1.0 - (ts / self.windows_time_ms)
+
         else:
-            ts = (ts - ts.min()) / (ts.max() - ts.min()) # normalize timestamps
-        
-        ts = ts.astype(np.float32)
-        
-        # xs, ys = self.resize_transform(xs, ys)
-        # xs, ys = self.resize_transform(xs, ys)
-        # width, height = self.resize_transform.width, self.resize_transform.height
 
-        
+            ts_min = ts.min()
+            ts_max = ts.max()
+            ts_range = ts_max - ts_min
 
-        # print(ts)
-        # ts = (ts[-1] - ts) * 1e-3 # microseconds to milliseconds
-        # ts = ts * 1e-3 # microseconds to milliseconds 
+            if ts_range == 0:
+                ts = ts - ts_min
+            else:
+                ts = (ts - ts.min()) / (ts.max() - ts.min()) # normalize timestamps
+            
+            ts = ts.astype(np.float32)
+            
 
-        # print("frame index: ", fs[-1])
+            xs, ys = self.resize_transform(xs, ys)
+            width, height = self.resize_transform.width, self.resize_transform.height
 
-        xs, ys = self.resize_transform(xs, ys)
-        width, height = self.resize_transform.width, self.resize_transform.height
+            xs = xs.astype(np.int32)
+            ys = ys.astype(np.int32)
+            ps = ps.astype(np.int32)
 
-        xs = xs.astype(np.int32)
-        ys = ys.astype(np.int32)
-        ps = ps.astype(np.int32)
+            # fs = torch.from_numpy(fs)
 
-        fs = torch.from_numpy(fs)
+            # weights = compute_temporal_weights(ts, self.temporal_bins)
+            # weighted_fs = weights * fs.unsqueeze(1)  # [num_events, num_bins]
+            # sum_weighted_fs = torch.sum(weighted_fs, dim=0)  # [num_bins]
+            # sum_weights = torch.sum(weights, dim=0)  # [num_bins]
 
-        weights = compute_temporal_weights(ts, self.temporal_bins)
-        weighted_fs = weights * fs.unsqueeze(1)  # [num_events, num_bins]
-        sum_weighted_fs = torch.sum(weighted_fs, dim=0)  # [num_bins]
-        sum_weights = torch.sum(weights, dim=0)  # [num_bins]
+            # # Avoid division by zero
+            # average_fs = sum_weighted_fs / (sum_weights + 1e-6)
+            # bin_frame_indices = torch.round(average_fs).to(torch.long)
 
-        # Avoid division by zero
-        average_fs = sum_weighted_fs / (sum_weights + 1e-6)
-        bin_frame_indices = torch.round(average_fs).to(torch.long)
+            # # Handle bins with no events (optional: interpolate or use default)
+            # # TODO: Add interpolation for empty bins
+            # bin_frame_indices[sum_weights == 0] = -1  # Placeholder for no data
+            # if -1 in bin_frame_indices:
+            #     bin_frame_indices = interpolate_missing_bins(bin_frame_indices)
 
-        # Handle bins with no events (optional: interpolate or use default)
-        # TODO: Add interpolation for empty bins
-        bin_frame_indices[sum_weights == 0] = -1  # Placeholder for no data
-        if -1 in bin_frame_indices:
-            bin_frame_indices = interpolate_missing_bins(bin_frame_indices)
-            # print("Interpolated missing bins", bin_frame_indices)
+            events_tensor = np.stack([xs, ys, ts, ps], axis=1)
 
-        # print("frame index: ", fs[-1])
-        # print("bin_frame_indices: ", bin_frame_indices)
-
-        events_tensor = np.stack([xs, ys, ts, ps], axis=1)
-
-        events_tensor = torch.tensor(events_tensor, dtype=torch.float32)
+            events_tensor = torch.tensor(events_tensor, dtype=torch.float32)
         
 
         data = {
@@ -406,9 +423,12 @@ class RawEvent:
         }
 
         if data_batch.shape[-1] >= 5:
-            # data['frame_index'] = fs[-1]
+            data['frame_index'] = fs[-1]
             # data['frame_index'] = torch.tensor([fs[-1]])
-            data['frame_index'] = bin_frame_indices        
+            # if self.augmentation:
+            #     data['frame_index'] = torch.tensor([fs[-1]])
+            # else:
+            #     data['frame_index'] = bin_frame_indices        
         
         if data_batch.shape[-1] == 6:
             data['segmentation_indices'] = segmentation.astype(np.uint8)

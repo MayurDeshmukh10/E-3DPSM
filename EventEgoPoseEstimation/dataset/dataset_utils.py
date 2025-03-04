@@ -12,7 +12,10 @@ from natsort import natsorted
 from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data.dataloader import default_collate
 import torch
-
+import cv2
+from EventEgoPoseEstimation.dataset import transforms
+import torch.nn.functional as F
+import ocam
                                                      
 h5py_File = functools.partial(h5py.File, libver='latest', swmr=True)
 
@@ -262,3 +265,168 @@ def create_image(representation):
     # representation = representation ** gamma
 
     return representation
+
+
+def save_augmented_data(data, path):
+    # Assuming data is a torch tensor of shape (20, 192, 256)
+    # Collapse the temporal bins for each polarity:
+    data = data * 255  # Scale to [0, 255]
+    positive_channel = data[:10].sum(dim=0)  # Shape: (192, 256)
+    negative_channel = data[10:].sum(dim=0)  # Shape: (192, 256)
+    
+    # (Optional) Clamp or normalize if necessary:
+    # For example, if you want values in the range [0, 255]:
+    positive_channel = positive_channel.clamp(0, 255)
+    negative_channel = negative_channel.clamp(0, 255)
+    
+    # Convert to numpy arrays (if data is on GPU, .cpu() is needed):
+    positive_channel = positive_channel.cpu().numpy().astype(np.uint8)
+    negative_channel = negative_channel.cpu().numpy().astype(np.uint8)
+    
+    # Get spatial dimensions (192, 256)
+    # h, w = data.shape[:2]
+    h, w = positive_channel.shape
+    
+    # Add channel dimension so each becomes (h, w, 1)
+    positive_channel = positive_channel[..., None]
+    negative_channel = negative_channel[..., None]
+    
+    # Create a blank channel (you can use it for visualization or as a separator)
+    blank_channel = np.zeros((h, w, 1), dtype=np.uint8)
+    
+    # Concatenate to form a three-channel image: 
+    # [positive, blank, negative]
+    image = np.concatenate([positive_channel, blank_channel, negative_channel], axis=2)
+
+    return image
+    
+    # Save the image using OpenCV
+    cv2.imwrite(path, image)
+
+def save_mask_image(mask, path):
+    """
+    Saves a mask tensor as an image.
+    
+    Parameters:
+        mask (torch.Tensor or np.ndarray): Mask with shape (1, H, W) or (H, W).
+            Expected to contain binary values (0 or 1) or booleans.
+        path (str): Path where the image will be saved.
+    """
+    # If mask is a torch tensor, move to CPU and convert to numpy
+    if isinstance(mask, torch.Tensor):
+        mask = mask.cpu().numpy()
+    
+    # If mask has an extra channel dimension (1, H, W), squeeze it
+    if mask.ndim == 3 and mask.shape[0] == 1:
+        mask = mask.squeeze(0)
+    
+    # Convert mask to uint8. If it's binary, multiply by 255.
+    if mask.dtype != np.uint8:
+        # Check if the mask is binary or boolean and convert accordingly:
+        if mask.dtype == np.bool_ or np.array_equal(np.unique(mask), [0, 1]):
+            mask = (mask.astype(np.uint8)) * 255
+        else:
+            mask = mask.astype(np.uint8)
+    
+    # Save the mask image using OpenCV
+    cv2.imwrite(path, mask)
+
+
+def random_dropout(x, p):
+    mask = (torch.rand_like(x) > p).float()
+    return x * mask
+
+def flip_axis(x, axis):
+    import pdb; pdb.set_trace()
+
+    x = x.permute(axis, *[i for i in range(x.dim()) if i != axis])  # Swap `axis` with the first dim
+    x = torch.flip(x, [0])  # Flip along the first dim
+    x = x.permute(*[i for i in range(1, x.dim()) if i != axis], 0)  # Swap back to original order
+    
+    return x.clone()  # Ensures a new tensor is returned
+
+def event_augmentation(self, event_voxel, temporal_step, augmentation_data):
+    bg_data_list = augmentation_data['bg_data'][temporal_step]
+    bg_mask_list = augmentation_data['bg_mask'][temporal_step]
+
+    event_voxels = []
+    target_width = self.width
+    target_height = self.height
+
+    for index, (bg_data, bg_mask_tensor) in enumerate(zip(bg_data_list, bg_mask_list)):
+        if type(bg_data) == list:
+            voxel = event_voxel[index]
+            event_voxels.append(voxel)
+            continue
+
+        bg_mask = bg_mask_tensor.cpu().numpy()
+        bg_mask = cv2.dilate(bg_mask, np.ones((2, 2)), iterations=1)
+        bg_mask = ~bg_mask.astype(bool)
+
+        voxel = event_voxel[index]
+        # save_mask_image(bg_mask, f'/CT/EventEgo3Dv2/work/EventEgo3Dv2/visualizations/augmented_data_flow/mask_{index}.png')
+        mask = bg_mask.squeeze(0)
+        voxel[:10, mask] += bg_data[:, :, 0][mask] # for all bins positive events
+        voxel[10:, mask] += bg_data[:, :, 1][mask] # for all bins negative events
+        # voxel = voxel.clamp(0, 1) # causing problems in backpropagation
+        event_voxels.append(voxel)
+
+    if len(event_voxels) != 0:
+        out = torch.stack(event_voxels, dim=0)
+        add_mask = (torch.rand(target_height, target_width, 20) > 0.9995).float()
+        add_mask = add_mask.unsqueeze(0).permute(0, 3, 1, 2)  # [1, 20, 192, 256]
+        add_mask = add_mask.expand(out.shape[0], -1, -1, -1).cuda()  # [2, 20, 192, 256]
+        out = out + add_mask
+
+        if np.random.rand() > 0.5:
+            out = random_dropout(out, np.random.rand() * 0.1)
+
+        # if np.random.random() < 0.5:
+        #     out = flip_axis(out, -1)
+
+        event_voxel = out
+
+    return event_voxel.cuda()
+
+
+def camera_to_j2d_batch(gt_j3d, image_size):
+    ocam_calib_json = '/CT/EventEgo3Dv2/work/egoposeformer/pose_estimation/models/utils/intrinsics.json'
+    ocam_model = ocam.to_ocam_model(ocam_calib_json)
+
+    h, w = ocam_model['height'], ocam_model['width']
+    gt_j3d = gt_j3d.clone()
+    gt_j3d[:, :, 2] *= -1
+
+    point_2Ds = ocam.world2cam_torch_batch(gt_j3d[:, :, None, :], ocam_model)[:, :, 0, :]
+    point_2Ds[:, :, 1] = h - point_2Ds[:, :, 1]
+    
+    width, height = image_size
+    sx = width / w
+    sy = height / h
+
+    point_2Ds[:, :, 0] *= sx
+    point_2Ds[:, :, 1] *= sy
+    
+    return point_2Ds.unsqueeze(1)
+
+    # # width, height = config.MODEL.IMAGE_SIZE   
+    # # width, height = (256, 256)
+    # # sx = width / w
+    # # sy = height / h
+
+    # # point_2Ds[:, :, 0] *= sx
+    # # point_2Ds[:, :, 1] *= sy
+
+    # point_2Ds[:, :, 0] = point_2Ds[:, :, 0] / w
+    # point_2Ds[:, :, 1] = point_2Ds[:, :, 1] / h
+
+    # in_fov = (
+    #     (point_2Ds[..., 0] > 0)
+    #     & (point_2Ds[..., 1] > 0)
+    #     & (point_2Ds[..., 0] < 1)
+    #     & (point_2Ds[..., 1] < 1)
+    # )
+
+    # point_2Ds = point_2Ds.clamp(min=0.0, max=1.0)
+    
+    # return point_2Ds.unsqueeze(1), in_fov.unsqueeze(1)

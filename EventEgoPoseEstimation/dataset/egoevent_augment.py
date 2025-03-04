@@ -19,7 +19,7 @@ from EventEgoPoseEstimation.dataset.egoevent import SingleSequenceDataset
 
 
 class AugmentedEgoEvent(Dataset): 
-    def __init__(self, cfg, target_dataset):
+    def __init__(self, cfg, target_dataset, split, temporal_bins):
         super().__init__()
         cfg = copy.deepcopy(cfg)
         
@@ -28,13 +28,16 @@ class AugmentedEgoEvent(Dataset):
         self.target_dataset = target_dataset
         is_train = target_dataset.is_train
         dataset_root = Path(cfg.DATASET.BACKGROUND_DATASET_ROOT)
+        self.temporal_bins = temporal_bins
+
+        self.split = split
         
         datasets = list()
         for item in os.listdir(dataset_root):
             data_path = dataset_root / item
             
             if os.path.isdir(data_path):
-                dataset = SingleSequenceDataset(cfg, data_path, is_train)
+                dataset = SingleSequenceDataset(cfg, data_path, is_train, split, temporal_bins, augmentation=True)
                 if dataset.isvalid():
                     self.visualize = dataset.visualize
                     datasets.append(dataset)
@@ -68,26 +71,31 @@ class AugmentedEgoEvent(Dataset):
             
         data, meta = self.target_dataset[idx]
         
-        # if self.is_train and random.random() < 0.5:            
-        #     if torch.sum(meta['vis_j3d']) != 0:
-        #         mask = data['segmentation_mask'][0].numpy()
-        #         mask = cv2.dilate(mask, np.ones((2, 2)), iterations=1)
-        #         bg_mask = ~mask.astype(bool)
+        meta['use_bg'] = False
 
-        #         # if 'start_index' in kwargs:
-        #         #     start_index = kwargs['start_index']
-        #         #     np.random.seed(start_index)
-        #         #     aidx = np.random.randint(0, self.index_len - 1 - 25) # 25 is the number of timesteps
-        #         #     aidx += kwargs['offset_index']  
-        #         # else:
-        #         aidx = np.random.randint(0, self.index_len - 1)
-                
-        #         dataset_idx, sample_idx = self.indices[aidx]
-        #         bg_data, bg_meta = self.datasets[dataset_idx][sample_idx, kwargs]
+        if torch.sum(meta['vis_j3d']) != 0:
+            mask = data['segmentation_mask'][0].numpy()
+            mask = cv2.dilate(mask, np.ones((2, 2)), iterations=1)
+            bg_mask = ~mask.astype(bool)
 
-        #         data['x'][:, bg_mask] += bg_data['x'][:, bg_mask]
-        #         data['x'].clamp_(0, 1)
+            # if 'start_index' in kwargs:
+            #     start_index = kwargs['start_index']
+            #     np.random.seed(start_index)
+            #     aidx = np.random.randint(0, self.index_len - 1 - 25) # 25 is the number of timesteps
+            #     aidx += kwargs['offset_index']  
+            # else:
+            aidx = np.random.randint(0, self.index_len - 1)
+            
+            dataset_idx, sample_idx = self.indices[aidx]
+            bg_data, bg_meta = self.datasets[dataset_idx][sample_idx, kwargs]
 
+            # data['x'][:, bg_mask] += bg_data['x'][:, bg_mask]
+            # data['x'].clamp_(0, 1)
+            meta['bg_data'] = bg_data['x']
+
+            if self.split == 'train' and random.random() < 0.5:
+                meta['use_bg'] = True
+        
         return data, meta
 
     @classmethod
