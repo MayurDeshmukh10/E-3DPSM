@@ -9,7 +9,7 @@ model:
       input_channel: 20 #36 (works well in vis) #18 #12 #18
       posenet_input_channel: 20
       image_size: [256, 192]
-      batch_size: 3 #16 # 9 # individual batch size
+      batch_size: 6 #16 # 9 # individual batch size
       #heatmap_size: [config.MODEL.IMAGE_SIZE[0] // config.MODEL.HEAT_MAP_SCALE, config.MODEL.IMAGE_SIZE[1] // config.MODEL.HEAT_MAP_SCALE] TODO: fix this
     
     # dataset_cfg:
@@ -44,8 +44,9 @@ model:
     use_bg_augmentation: true
     temporal_steps: 10
     sample_step: 10
-    batch_size: 3
-    workers: 0
+    merge_frames: 3
+    batch_size: 6
+    workers: 14
 
 
 # ckpt_path: /CT/EventEgo3Dv2/work/EventEgo3Dv2/results/wandb_data/pretraining_new_dataloader_oom_fixed_5_2_1/EventEgo3Dv2/2pnvayg2/checkpoints/last.ckpt
@@ -54,8 +55,8 @@ trainer:
   accelerator: gpu
   max_epochs: 15
   check_val_every_n_epoch: 1
-  devices: 1 #4
-  # num_nodes: 2
+  devices: 4
+  num_nodes: 2
   benchmark: false
   # precision: 16-mixed
   strategy: ddp_find_unused_parameters_true
@@ -85,14 +86,14 @@ trainer:
     # - class_path: pytorch_lightning.callbacks.LearningRateFinder
 
   logger:
-  # - class_path: pytorch_lightning.loggers.WandbLogger
-  #   init_args:
-  #     name: pretraining_new_dataloader_oom_fixed_5_2_2  # Experiment name on wandb
-  #     project: EventEgo3Dv2  # Replace with your project name on wandb
-  #     save_dir: ./results/wandb_data/pretraining_new_dataloader_oom_fixed_5_2_2  # Local directory to save wandb logs
-  #     log_model: true  # Log the model checkpoints to wandb
-  #     offline: false  # Set to true if you want to log offline and sync later
+  - class_path: pytorch_lightning.loggers.WandbLogger
+    init_args:
+      name: pretraining_new_dataloader_3_merged_frames # Experiment name on wandb
+      project: EventEgo3Dv2  # Replace with your project name on wandb
+      save_dir: ./results/wandb_data/pretraining_new_dataloader_3_merged_frames  # Local directory to save wandb logs
+      log_model: true  # Log the model checkpoints to wandb
+      offline: false  # Set to true if you want to log offline and sync later
   - class_path: pytorch_lightning.loggers.TensorBoardLogger
     init_args:
       save_dir: ./results/
-      name: test  # TensorBoard experiment name
+      name: pretraining_new_dataloader_3_merged_frames  # TensorBoard experiment name

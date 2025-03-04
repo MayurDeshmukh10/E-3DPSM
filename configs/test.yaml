@@ -41,14 +41,15 @@ model:
     dataset_type:  synthetic #synthetic #synthetic # real
     training_type: pretrain #pretrain #pretrain #finetune #pretrain # finetune
     use_bg_augmentation: true
-    temporal_steps: 20
+    temporal_steps: 10
     sample_step: 10
+    merge_frames: 3
     batch_size: 6
     workers: 14
 
 
 
-ckpt_path: /CT/EventEgo3Dv2/work/EventEgo3Dv2/results/wandb_data/pretraining_new_dataloader_oom_fixed_5/EventEgo3Dv2/a48pwu92/checkpoints/epoch=6.ckpt
+# ckpt_path: /CT/EventEgo3Dv2/work/EventEgo3Dv2/results/wandb_data/pretraining_new_dataloader_oom_fixed_5/EventEgo3Dv2/a48pwu92/checkpoints/epoch=6.ckpt
 # ckpt_path: /CT/EventEgo3Dv2/work/EventEgo3Dv2/results/wandb_data/pretraining_new_dataloader_oom_fixed_5_1/EventEgo3Dv2/ha8vz1xf/checkpoints/epoch=9.ckpt
 
 trainer:
@@ -63,7 +64,7 @@ trainer:
   # strategy: ddp
   fast_dev_run: false
   # limit_train_batches: 10000
-  # limit_val_batches: 10
+  limit_val_batches: 200
   # every_n_train_steps: 200
   # gradient_clip_val: 5
   # gradient_clip_algorithm: norm

@@ -26,7 +26,7 @@ class SyntheticEventStream(Dataset):
         self.cfg = cfg
         self.split = split
 
-        # split = 'train'
+        # split = 'test'
 
         with open(self.data_path / 'event_meta.json', 'r') as f:
             meta = json.load(f)
@@ -147,7 +147,7 @@ class SyntheticEventStream(Dataset):
     #     return out
     
 
-    def get_event_batch(self, frame_idx):
+    def get_event_batch(self, frame_idx, kwargs={}):
         # if self.is_augmentation or self.split in ['val', 'train', 'test']: # remove train currently here for testing
         if self.is_augmentation:
 
@@ -176,11 +176,6 @@ class SyntheticEventStream(Dataset):
                 idx += num_events
 
             if len(data_batches) == 0:
-                # print("batch zero")
-                # print("Frame IDx", frame_idx)
-                # print("Idx", idx)
-                # print("")
-                # mayur
                 raise StopIteration
             
             data_batches_np = np.concatenate(data_batches, axis=0)
@@ -192,10 +187,14 @@ class SyntheticEventStream(Dataset):
         
         start = self.cumulative_offsets[frame_idx]
 
-        # try:
-        #     end = self.cumulative_offsets[frame_idx + 10]
-        # except:
-        end = self.cumulative_offsets[frame_idx + 1]
+        try:
+            if kwargs.get('merge_frames', 0) > 0:
+                end = self.cumulative_offsets[frame_idx + kwargs['merge_frames']]
+            else:
+                end = self.cumulative_offsets[frame_idx + 1]
+        except:
+                end = self.cumulative_offsets[frame_idx + 1]
+        
         data_batch = self.fin[start:end]
 
         # try:
@@ -223,7 +222,7 @@ class SyntheticEventStream(Dataset):
 
         actual_frame_idx = self.valid_indices[idx]
         # actual_frame_idx = idx # for time window appoarch
-        data_batch = self.get_event_batch(actual_frame_idx)
+        data_batch = self.get_event_batch(actual_frame_idx, kwargs)
         return data_batch
 
     def get_annoation(self, index):

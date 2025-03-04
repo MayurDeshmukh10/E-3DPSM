@@ -68,6 +68,7 @@ class EventEgoPoseEstimation(LightningModule):
         training_type: str,
         temporal_steps: int,
         sample_step: int,
+        merge_frames: int,
         use_bg_augmentation: bool,
         batch_size: int,
         workers: int,
@@ -100,6 +101,7 @@ class EventEgoPoseEstimation(LightningModule):
         self.lr_decay_epochs = lr_decay_epochs
 
         self.temporal_steps = temporal_steps
+        self.merge_frames = int(merge_frames)
 
         self.train_dataset: Optional[Dataset] = None
         self.eval_dataset: Optional[Dataset] = None
@@ -183,8 +185,8 @@ class EventEgoPoseEstimation(LightningModule):
                 cfg.DATASET.TYPE = 'Synthetic'
                 cfg.DATASET.SYN_ROOT = cfg.DATASET.SYN_TEST_ROOT 
                 # TODO: change test to val again
-                self.eval_dataset = TemoralWrapper(EgoEvent(cfg, temporal_bins=self.temporal_bins, split='test'), self.temporal_steps, split='test', sample_step=self.sample_step)
-                self.train_dataset = TemoralWrapper(pretrain_dataset, self.temporal_steps, split='train', sample_step=self.sample_step)
+                self.eval_dataset = TemoralWrapper(EgoEvent(cfg, temporal_bins=self.temporal_bins, split='test'), self.temporal_steps, split='test', sample_step=self.sample_step, merge_frames=self.merge_frames)
+                self.train_dataset = TemoralWrapper(pretrain_dataset, self.temporal_steps, split='train', sample_step=self.sample_step, merge_frames=self.merge_frames)
 
             elif self.training_type == 'finetune':
                 logger.info("Training type: Finetune")
@@ -229,7 +231,7 @@ class EventEgoPoseEstimation(LightningModule):
             self.train_dataset,
             batch_size=self.batch_size,
             collate_fn=collate_variable_size,
-            shuffle=True,
+            shuffle=True, # TODO: change this
             num_workers=self.workers,
             pin_memory=True,
             drop_last=True
@@ -304,12 +306,13 @@ class EventEgoPoseEstimation(LightningModule):
                            loss_bone_length, gt_poses, pred_poses, valid_j3d, inp)
 
             end = time.time()
-            self._log_memory_stats(inp)
-            self._log_training_progress(batch_idx, inp, end)
-            print("Input shape ", inp.shape)
+            
+            # print("Input shape ", inp.shape)
 
             if batch_idx % cfg.PRINT_FREQ == 0:
                 self._log_metrics()
+                self._log_memory_stats(inp)
+                self._log_training_progress(batch_idx, inp, end)
 
                 # if int(self.batch_size) < 4:
                 #     n_images = int(self.batch_size)
@@ -428,7 +431,7 @@ class EventEgoPoseEstimation(LightningModule):
                 'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t' \
                 'MPJPE {acc.val:.4f} ({acc.avg:.4f})\t' \
                 'Val loss  {val_loss.val:.4f} ({val_loss.avg:.4f})\t'.format(
-                    batch_idx, self.trainer.num_test_batches, batch_time=self.batch_time,
+                    batch_idx, self.trainer.num_val_batches, batch_time=self.batch_time,
                     acc=self.acc_j3d_val, val_loss=self.j3d_loss_val)
             logger.info(msg)
 
