@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 # scaler = GradScaler()
 
-def compute_fn(model, batch, temporal_steps, prev_buffer=None, prev_key=None, batch_first=False, device='cuda'):
+def compute_fn(model, batch, temporal_steps, device='cuda'):
     inps = []
     new_inps = []
     frame_index = []
@@ -38,6 +38,9 @@ def compute_fn(model, batch, temporal_steps, prev_buffer=None, prev_key=None, ba
     vis_j3d = []
     valid_j3d = []
     valid_seg = []
+    bg_data = []
+    bg_mask = []
+    filename = []
 
 
     data_batch = batch[0]
@@ -45,11 +48,10 @@ def compute_fn(model, batch, temporal_steps, prev_buffer=None, prev_key=None, ba
 
     if len(data_batch[0]['x']) < temporal_steps:
         temporal_steps = 1
-        # import pdb; pdb.set_trace()
 
     for i in range(temporal_steps):
         inps_t = []
-        # frame_index_t = []
+        frame_index_t = []
         gt_hms_t = []
         gt_j2d_t = []
         gt_j3d_t = []
@@ -58,11 +60,11 @@ def compute_fn(model, batch, temporal_steps, prev_buffer=None, prev_key=None, ba
         vis_j3d_t = []
         valid_j3d_t = []
         valid_seg_t = []
+        bg_data_t = []
+        bg_mask_t = []
+        filename_t = []
         for data, meta in zip(data_batch, meta_batch):
             inp = data['x'][i]
-            # inp = torch.from_numpy(inp)
-
-            # print(f"For step {i}, shape of input is {inp.shape}")
             inps_t.append(inp)
 
             gt_hms_ = data['hms'][i]
@@ -76,22 +78,46 @@ def compute_fn(model, batch, temporal_steps, prev_buffer=None, prev_key=None, ba
             valid_j3d_ = meta['valid_j3d'][i]
             valid_seg_ = meta['valid_seg'][i]
             frame_index_ = meta['frame_index'][i]
+            pose_filename_ = meta['pose_filename'][i]
 
-            gt_hms.append(gt_hms_)
-            gt_j3d.append(gt_j3d_)
-            gt_seg.append(gt_seg_)
+            try:
+                if meta['use_bg'][i] == True:
+                    bg_data_ = meta['bg_data'][i]
+                else:
+                    bg_data_ = []
+            except KeyError: # case where dataloader for test and val
+                bg_data_ = []
 
-            gt_j2d.append(gt_j2d_)
-            vis_j2d.append(vis_j2d_)
-            vis_j3d.append(vis_j3d_)
-            valid_j3d.append(valid_j3d_)
-            valid_seg.append(valid_seg_)
+            bg_data_t.append(bg_data_)
 
+            gt_hms_t.append(gt_hms_)
+            gt_j3d_t.append(gt_j3d_)
+            gt_seg_t.append(gt_seg_)
+
+            gt_j2d_t.append(gt_j2d_)
+            vis_j2d_t.append(vis_j2d_)
+            vis_j3d_t.append(vis_j3d_)
+            valid_j3d_t.append(valid_j3d_)
+            valid_seg_t.append(valid_seg_)
+            
+            filename_t.append(pose_filename_)
             frame_index.append(frame_index_)
+        
+        bg_data.append(bg_data_t)
+        gt_j3d.append(torch.stack(gt_j3d_t))
+        gt_hms.append(torch.stack(gt_hms_t))
+        gt_seg.append(torch.stack(gt_seg_t))
+        gt_j2d.append(torch.stack(gt_j2d_t))
+        vis_j2d.append(torch.stack(vis_j2d_t))
+        vis_j3d.append(torch.stack(vis_j3d_t))
+        valid_j3d.append(torch.stack(valid_j3d_t))
+        valid_seg.append(torch.stack(valid_seg_t))
+        filename.append(filename_t)
+        # filename.append
+
         
         max_rows = max([inp.shape[0] for inp in inps_t])
         padding_value = torch.tensor([-10, -10, -10, -10], dtype=torch.float32, device=device)
-        # import pdb; pdb.set_trace()
         padded_inps_t = [
             torch.cat([inp, padding_value.repeat(max_rows - inp.shape[0], 1)], dim=0)
             for inp in inps_t
@@ -117,31 +143,29 @@ def compute_fn(model, batch, temporal_steps, prev_buffer=None, prev_key=None, ba
     vis_j2d = torch.stack(vis_j2d)
     vis_j3d = torch.stack(vis_j3d)
     valid_j3d = torch.stack(valid_j3d)
-    valid_seg = torch.cat([v.unsqueeze(0) for v in valid_seg])
+    # valid_seg = torch.cat([v.unsqueeze(0) for v in valid_seg])
+    valid_seg = torch.stack(valid_seg)
     frame_index = torch.cat([v.unsqueeze(0) for v in frame_index], dim=0)
-    
-    # print("Inps shape: ", inps.shape)
-    # logger.info("Batch shape: {}".format(inp.shape))
-    # memory_stats = torch.cuda.memory_stats("cuda:0")
-    # logger.info("Before model")
-    # logger.info(f"Current allocated memory: {memory_stats['allocated_bytes.all.current'] / (1024 ** 2):.2f} MB")
-    # logger.info(f"Peak allocated memory: {memory_stats['allocated_bytes.all.peak'] / (1024 ** 2):.2f} MB")
-    # logger.info(f"Current reserved memory: {memory_stats['reserved_bytes.all.current'] / (1024 ** 2):.2f} MB")
-    # logger.info(f"Peak reserved memory: {memory_stats['reserved_bytes.all.peak'] / (1024 ** 2):.2f} MB")
-    # print("Inps shape: ", inps.shape)
-    _, _, N, C = inps.shape
-    # if len(str(N)) > 6: # skip if too many samples
-    # if int(N) > 700000:
-    
-    #     return inps, _, gt_hms, gt_j3d, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index, False
+    # filename = torch.stack(filename)
 
-    # try:
-    outputs = model(inps, prev_buffer, prev_key, batch_first)
+    # bg_data = torch.stack(bg_data)
+    
+    _, _, N, C = inps.shape
+
+
+    augmentation_data = { 
+        'bg_mask': gt_seg,
+        'bg_data': bg_data
+    }
+
+    del batch
+    
+    outputs = model(inps, augmentation_data)
     # except torch.OutOfMemoryError:
     #     return inps, _, gt_hms, gt_j3d, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index, False
 
     T, B, N, C = inps.shape
-    return inps.view(T * B, N, C), outputs, gt_hms, gt_j3d, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index, True
+    return inps.view(T * B, N, C), outputs, gt_hms, gt_j3d, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index, filename
 
 def percentile(t, q):
     B, C, H, W = t.shape
@@ -259,7 +283,7 @@ def train(config, train_loader, model, criterions, optimizer, epoch, output_dir,
         # logger.info(f"Current reserved memory: {memory_stats['reserved_bytes.all.current'] / (1024 ** 2):.2f} MB")
         # logger.info(f"Peak reserved memory: {memory_stats['reserved_bytes.all.peak'] / (1024 ** 2):.2f} MB")
         # try:
-        inp, outputs, gt_hms, gt_j3d, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index, status = compute_fn(model, batch, temporal_steps)
+        inp, outputs, gt_hms, gt_j3d, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index, pose_filename = compute_fn(model, batch, temporal_steps)
         if status is False: # if out of memory
             batch_skipped += 1
             print("Input shape: ", inp.shape)
