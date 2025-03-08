@@ -91,10 +91,10 @@ class RealEventStream(Dataset):
             num_events = self.batch_size
             idx = frame_idx * num_events
 
-            if self.is_train:
-                max_frame_time = random.randint(2, self.max_frame_time)
-            else:
-                max_frame_time = self.max_frame_time
+            # if self.is_train:
+            #     max_frame_time = random.randint(2, self.max_frame_time)
+            # else:
+            max_frame_time = self.max_frame_time
             
             frame_time = 0
             data_batches = []

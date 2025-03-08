@@ -32,7 +32,7 @@ model:
     sample_step: 10
     merge_frames: 3
     batch_size: 6
-    workers: 48
+    workers: 6
 
 
 # ckpt_path: /CT/EventEgo3Dv2/work/EventEgo3Dv2/results/wandb_data/pretraining_new_dataloader_oom_fixed_5_2_1/EventEgo3Dv2/2pnvayg2/checkpoints/last.ckpt
@@ -41,8 +41,8 @@ trainer:
   accelerator: gpu
   max_epochs: 15
   check_val_every_n_epoch: 1
-  devices: 8
-  # num_nodes: 2
+  devices: 4
+  num_nodes: 2
   benchmark: false
   # precision: 16-mixed
   strategy: ddp_find_unused_parameters_true
@@ -74,12 +74,12 @@ trainer:
   logger:
   - class_path: pytorch_lightning.loggers.WandbLogger
     init_args:
-      name: pretraining_ndl_merged_frames_3_step_10_gpu17 # Experiment name on wandb
+      name: pretraining_ndl_2_merged_frames_step_10_gpu20_1 # Experiment name on wandb
       project: EventEgo3Dv2  # Replace with your project name on wandb
-      save_dir: ./results/wandb_data/pretraining_ndl_merged_frames_3_step_10_gpu17  # Local directory to save wandb logs
+      save_dir: ./results/wandb_data/pretraining_ndl_2_merged_frames_step_10_gpu20_1  # Local directory to save wandb logs
       log_model: true  # Log the model checkpoints to wandb
       offline: false  # Set to true if you want to log offline and sync later
   - class_path: pytorch_lightning.loggers.TensorBoardLogger
     init_args:
       save_dir: ./results/
-      name: pretraining_ndl_merged_frames_3_step_10_gpu17  # TensorBoard experiment name
+      name: pretraining_ndl_2_merged_frames_step_10_gpu20_1  # TensorBoard experiment name

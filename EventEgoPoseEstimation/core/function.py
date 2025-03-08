@@ -40,8 +40,10 @@ def compute_fn(model, batch, temporal_steps, device='cuda'):
     valid_seg = []
     bg_data = []
     bg_mask = []
+    use_bg = []
     filename = []
 
+    augmentation_data = {}
 
     data_batch = batch[0]
     meta_batch = batch[1]
@@ -63,6 +65,8 @@ def compute_fn(model, batch, temporal_steps, device='cuda'):
         bg_data_t = []
         bg_mask_t = []
         filename_t = []
+        use_bg_t = []
+        skip_augmentation_data = False
         for data, meta in zip(data_batch, meta_batch):
             inp = data['x'][i]
             inps_t.append(inp)
@@ -79,16 +83,21 @@ def compute_fn(model, batch, temporal_steps, device='cuda'):
             valid_seg_ = meta['valid_seg'][i]
             frame_index_ = meta['frame_index'][i]
             pose_filename_ = meta['pose_filename'][i]
-
+             
             try:
-                if meta['use_bg'][i] == True:
-                    bg_data_ = meta['bg_data'][i]
-                else:
-                    bg_data_ = []
+                # if meta['use_bg'][i] == True:
+                #     bg_data_ = meta['bg_data'][i]
+                # else:
+                #     bg_data_ = []
+                bg_data_ = meta['bg_data'][i]
+                use_bg_ = meta['use_bg'][i]
             except KeyError: # case where dataloader for test and val
+                skip_augmentation_data = True
                 bg_data_ = []
 
-            bg_data_t.append(bg_data_)
+            if not skip_augmentation_data:
+                bg_data_t.append(bg_data_)
+                use_bg_t.append(use_bg_)
 
             gt_hms_t.append(gt_hms_)
             gt_j3d_t.append(gt_j3d_)
@@ -103,7 +112,11 @@ def compute_fn(model, batch, temporal_steps, device='cuda'):
             filename_t.append(pose_filename_)
             frame_index.append(frame_index_)
         
-        bg_data.append(bg_data_t)
+        # bg_data.append(bg_data_t)
+        if not skip_augmentation_data:
+            bg_data.append(torch.stack(bg_data_t))
+            use_bg.append(torch.stack(use_bg_t))
+
         gt_j3d.append(torch.stack(gt_j3d_t))
         gt_hms.append(torch.stack(gt_hms_t))
         gt_seg.append(torch.stack(gt_seg_t))
@@ -148,15 +161,20 @@ def compute_fn(model, batch, temporal_steps, device='cuda'):
     frame_index = torch.cat([v.unsqueeze(0) for v in frame_index], dim=0)
     # filename = torch.stack(filename)
 
-    # bg_data = torch.stack(bg_data)
+    if not skip_augmentation_data:
+        bg_data = torch.stack(bg_data)
+        use_bg = torch.stack(use_bg)
+
+        augmentation_data = { 
+            'bg_mask': gt_seg,
+            'bg_data': bg_data,
+            'use_bg': use_bg
+        }
     
     _, _, N, C = inps.shape
 
 
-    augmentation_data = { 
-        'bg_mask': gt_seg,
-        'bg_data': bg_data
-    }
+    
 
     del batch
     
@@ -166,6 +184,163 @@ def compute_fn(model, batch, temporal_steps, device='cuda'):
 
     T, B, N, C = inps.shape
     return inps.view(T * B, N, C), outputs, gt_hms, gt_j3d, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index, filename
+
+def compute_fn_v2(model, batch, temporal_steps, device='cuda'):
+    data_batch, meta_batch = batch
+    
+    # Early validation and adjustment of temporal_steps
+    if len(data_batch[0]['x']) < temporal_steps:
+        temporal_steps = len(data_batch[0]['x'])
+    
+    # Pre-allocate lists with known sizes where possible
+    batch_size = len(data_batch)
+    inps = []
+    gt_hms = []
+    gt_j3d = []
+    gt_seg = []
+    gt_j2d = []
+    vis_j2d = []
+    vis_j3d = []
+    valid_j3d = []
+    valid_seg = []
+    frame_index = []
+    filename = []
+    
+    # Check if augmentation data is available only once
+    skip_augmentation_data = False
+    try:
+        _ = meta_batch[0]['bg_data'][0]
+        _ = meta_batch[0]['use_bg'][0]
+    except KeyError:
+        skip_augmentation_data = True
+    
+    # Only create these if needed
+    bg_data = [] if not skip_augmentation_data else None
+    use_bg = [] if not skip_augmentation_data else None
+    
+    # padding_value = torch.tensor([-10, -10, -10, -10], dtype=torch.float32, device=device)
+    
+    # Process temporal steps more efficiently
+    for i in range(temporal_steps):
+        # Pre-allocate lists with known size
+        inps_t = []
+        gt_hms_t = []
+        gt_j3d_t = []
+        gt_seg_t = []
+        gt_j2d_t = []
+        vis_j2d_t = []
+        vis_j3d_t = []
+        valid_j3d_t = []
+        valid_seg_t = []
+        filename_t = []
+        frame_indices_t = []
+        
+        if not skip_augmentation_data:
+            bg_data_t = []
+            use_bg_t = []
+        
+        # Find max_rows for this temporal step during data collection
+        max_rows_t = 0
+        
+        # Process each item in the batch
+        for data_idx, (data, meta) in enumerate(zip(data_batch, meta_batch)):
+            # Extract data directly (avoid multiple dictionary lookups)
+            inp = data['x'][i]
+            # max_rows_t = max(max_rows_t, inp.shape[0])
+            inps_t.append(inp)
+            
+            # Collect ground truth data
+            gt_hms_t.append(data['hms'][i])
+            gt_j3d_t.append(data['j3d'][i])
+            gt_seg_t.append(data['segmentation_mask'][i])
+            
+            # Collect meta data
+            gt_j2d_t.append(meta['j2d'][i])
+            vis_j2d_t.append(meta['vis_j2d'][i])
+            vis_j3d_t.append(meta['vis_j3d'][i])
+            valid_j3d_t.append(meta['valid_j3d'][i])
+            valid_seg_t.append(meta['valid_seg'][i])
+            frame_indices_t.append(meta['frame_index'][i])
+            filename_t.append(meta['pose_filename'][i])
+            
+            # Collect augmentation data if available
+            if not skip_augmentation_data:
+                bg_data_t.append(meta['bg_data'][i])
+                use_bg_t.append(meta['use_bg'][i])
+        
+        # # Stack and pad inputs for this temporal step in one operation
+        # padded_inps_t = torch.stack([
+        #     torch.cat([inp, padding_value.repeat(max_rows_t - inp.shape[0], 1)], dim=0)
+        #     for inp in inps_t
+        # ])
+        
+        inps.append(inps_t)
+        frame_index.extend(frame_indices_t)
+        
+        # Stack all collected tensors for this temporal step
+        gt_hms.append(torch.stack(gt_hms_t))
+        gt_j3d.append(torch.stack(gt_j3d_t))
+        gt_seg.append(torch.stack(gt_seg_t))
+        gt_j2d.append(torch.stack(gt_j2d_t))
+        vis_j2d.append(torch.stack(vis_j2d_t))
+        vis_j3d.append(torch.stack(vis_j3d_t))
+        valid_j3d.append(torch.stack(valid_j3d_t))
+        valid_seg.append(torch.stack(valid_seg_t))
+        filename.append(filename_t)
+        
+        # Stack augmentation data if available
+        if not skip_augmentation_data:
+            bg_data.append(torch.stack(bg_data_t))
+            use_bg.append(torch.stack(use_bg_t))
+    
+    # Find maximum rows across all temporal steps
+    # max_rows = max(inp.shape[1] for inp in inps)
+    
+    # # Process and stack all inputs with uniform padding
+    # inps = torch.stack([
+    #     torch.stack([
+    #         torch.cat([row, padding_value.repeat(max_rows - row.shape[0], 1)], dim=0)
+    #         for row in temporal_step
+    #     ])
+    #     for temporal_step in inps
+    # ])
+    
+    # Stack all temporal data
+    gt_hms = torch.stack(gt_hms)
+    gt_j3d = torch.stack(gt_j3d)
+    gt_seg = torch.stack(gt_seg)
+    gt_j2d = torch.stack(gt_j2d)
+    vis_j2d = torch.stack(vis_j2d)
+    vis_j3d = torch.stack(vis_j3d)
+    valid_j3d = torch.stack(valid_j3d)
+    valid_seg = torch.stack(valid_seg)
+    
+    # Process frame indices as a single operation
+    frame_index = torch.stack([idx.unsqueeze(0) for idx in frame_index])
+    
+    # Create augmentation data dictionary only if needed
+    augmentation_data = {}
+    if not skip_augmentation_data:
+        bg_data = torch.stack(bg_data)
+        use_bg = torch.stack(use_bg)
+        
+        augmentation_data = {
+            'bg_mask': gt_seg,
+            'bg_data': bg_data,
+            'use_bg': use_bg
+        }
+    
+    # Free memory before running the model
+    del batch
+    # torch.cuda.empty_cache()  # Explicitly clear GPU cache
+    
+    # Run model
+    outputs = model(inps, augmentation_data)
+    
+    # Reshape inputs for return
+    # T, B, N, C = inps.shape
+    return (len(inps) * len(inps[0])), outputs, gt_hms, gt_j3d, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index, filename
+
 
 def percentile(t, q):
     B, C, H, W = t.shape

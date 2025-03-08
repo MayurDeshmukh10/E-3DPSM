@@ -191,7 +191,7 @@ class EROS(nn.Module):
         return out
 
 
-class EgoHPE(nn.Module):
+class EventTensor(nn.Module):
     def __init__(self,
             config,
             num_joints,
@@ -201,7 +201,7 @@ class EgoHPE(nn.Module):
             image_size,
             batch_size,
             ):
-        super(EgoHPE, self).__init__()
+        super(EventTensor, self).__init__()
 
         self.n_joints = num_joints
 
@@ -224,21 +224,7 @@ class EgoHPE(nn.Module):
         self.EROS = EROS(inp_chn=self.num_bins, height=self.height, width=self.width, batch_size=self.batch_size)
 
 
-    def forward(self, x, augmentation_data, device='cuda'):
-
-        s5_state = None
-        pose = None
-
-        T = len(x)
-        B = len(x[0])
-      
-        delta_poses = []
-        poses = []
-        seg_outs = []
-        heatmaps = []
-        s5_states = []
-        voxel_outs = []
-        event_voxels = []
+    def forward(self, x, device='cuda'):
 
         # for i in range(T):
 
@@ -255,9 +241,9 @@ class EgoHPE(nn.Module):
 
         # iterate over temporal steps
         # import pdb; pdb.set_trace()
-        for i in range(T):
+        # for i in range(T):
 
-            out = self.EROS(x[i], device)
+        event_tensor_repr = self.EROS(x, device)
 
             # import pdb; pdb.set_trace()
             # if not all(is_empty(inner) for sublist in augmentation_data['bg_data'] for inner in sublist):
@@ -274,43 +260,43 @@ class EgoHPE(nn.Module):
             #     save_augmented_data(o.detach(), f'/CT/EventEgo3Dv2/work/EventEgo3Dv2/visualizations/opt_augmented/sum_{ii}.png')
             #     save_augmented_data(out_copy[ii].detach(), f'/CT/EventEgo3Dv2/work/EventEgo3Dv2/visualizations/opt_augmented/sum_og_{ii}.png')
 
-            outs = self.event_3d_posenet(out, s5_state, pose, first_temporal_step=(i == 0))
+        #     outs = self.event_3d_posenet(out, s5_state, pose, first_temporal_step=(i == 0))
 
-            # outs = self.event_3d_posenet(event_voxels[i], s5_state, pose, first_temporal_step=(i == 0))
+        #     # outs = self.event_3d_posenet(event_voxels[i], s5_state, pose, first_temporal_step=(i == 0))
 
-            # import pdb; pdb.set_trace()
+        #     # import pdb; pdb.set_trace()
 
-            s5_state = outs['s5_state'].detach()
-            pose = outs['pose']
-            delta_pose = outs['delta_pose']
-            seg_out = outs['seg']
-            seg_feature = outs['seg_feature']
-            heatmap = outs['heatmaps']
-            if delta_pose is not None:
-                delta_poses.append(delta_pose)
-            poses.append(pose)
-            # s5_states.append(s5_state)
-            seg_outs.append(seg_out)
-            heatmaps.append(heatmap)
-            voxel_outs.append(out)
+        #     s5_state = outs['s5_state'].detach()
+        #     pose = outs['pose']
+        #     delta_pose = outs['delta_pose']
+        #     seg_out = outs['seg']
+        #     seg_feature = outs['seg_feature']
+        #     heatmap = outs['heatmaps']
+        #     if delta_pose is not None:
+        #         delta_poses.append(delta_pose)
+        #     poses.append(pose)
+        #     # s5_states.append(s5_state)
+        #     seg_outs.append(seg_out)
+        #     heatmaps.append(heatmap)
+        #     voxel_outs.append(out)
 
-        abs_poses = torch.stack(poses)
-        if len(delta_poses) > 0:
-            delta_poses = torch.stack(delta_poses)
-        seg_outs = torch.stack(seg_outs)
-        heatmaps = torch.stack(heatmaps)
-        voxel_representations = torch.stack(voxel_outs)
-        # s5_states = torch.stack(s5_states)
+        # abs_poses = torch.stack(poses)
+        # if len(delta_poses) > 0:
+        #     delta_poses = torch.stack(delta_poses)
+        # seg_outs = torch.stack(seg_outs)
+        # heatmaps = torch.stack(heatmaps)
+        # voxel_representations = torch.stack(voxel_outs)
+        # # s5_states = torch.stack(s5_states)
         
-        outputs = {}
-        outputs['abs_poses'] = abs_poses  
-        outputs['seg'] = seg_outs
-        outputs['delta_poses'] = delta_poses
-        outputs['heatmaps'] = heatmaps
-        outputs['voxel_representations'] = voxel_representations
+        # outputs = {}
+        # outputs['abs_poses'] = abs_poses  
+        # outputs['seg'] = seg_outs
+        # outputs['delta_poses'] = delta_poses
+        # outputs['heatmaps'] = heatmaps
+        # outputs['voxel_representations'] = voxel_representations
         # outputs['s5_states'] = s5_states
  
-        return outputs
+        return event_tensor_repr
 
 def is_empty(item):
     if isinstance(item, torch.Tensor):

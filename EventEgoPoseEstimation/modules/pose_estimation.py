@@ -38,7 +38,7 @@ from EventEgoPoseEstimation.utils.skeleton import Skeleton
 
 from configs.settings import config as cfg
 
-from EventEgoPoseEstimation.core.function import compute_fn, _print_name_value
+from EventEgoPoseEstimation.core.function import compute_fn, _print_name_value, compute_fn_v2
 
 from EventEgoPoseEstimation.core.evaluate import accuracy, accuracy_with_vis
 
@@ -47,6 +47,8 @@ from EventEgoPoseEstimation.core.loss import SegmentationLoss, BoneLengthLoss, J
 from EventEgoPoseEstimation.utils.vis import save_pose_images, save_debug_images, save_debug_3d_joints, save_debug_segmenation, save_debug_eros, generate_skeleton_image, dump_sketelon_image
 
 from EventEgoPoseEstimation.core.inference import get_j2d_from_hms
+
+import ocam
 
 import torchvision
 
@@ -87,6 +89,8 @@ class EventEgoPoseEstimation(LightningModule):
 
         self.training_type = training_type
 
+        import pdb; pdb.set_trace()
+
         self.model = EgoHPE(cfg, **model_cfg)
 
         self.input_channel = model_cfg['input_channel']
@@ -96,6 +100,7 @@ class EventEgoPoseEstimation(LightningModule):
         self.use_bg_augmentation = use_bg_augmentation
         self.batch_size = batch_size
         self.workers = workers
+
         self.sample_step = sample_step
         self.lr = lr
         self.lr_decay_epochs = lr_decay_epochs
@@ -157,6 +162,8 @@ class EventEgoPoseEstimation(LightningModule):
         self.wgt_j3d_delta = loss_weights['delta_j3d']
 
         self.s5_states = None
+
+        self.ocam_model = ocam.to_ocam_model('/CT/EventEgo3Dv2/work/egoposeformer/pose_estimation/models/utils/intrinsics.json')
 
 
         # self.initial_pose = torch.from_numpy(np.load('./initial_pose.npy')).unsqueeze(0).expand(self.model_batch_size, -1, -1)
@@ -227,6 +234,7 @@ class EventEgoPoseEstimation(LightningModule):
             # self.test_dataset = TemoralWrapper(pretrain_dataset, self.temporal_steps, split='test', sample_step=self.sample_step)
 
     def train_dataloader(self):
+        print("Total workers : ", self.workers)
         dataloader = torch.utils.data.DataLoader(
             self.train_dataset,
             batch_size=self.batch_size,
@@ -271,12 +279,12 @@ class EventEgoPoseEstimation(LightningModule):
         loss = torch.tensor(0.1, requires_grad=True, device=self.device)
 
         try:
-            inp, outputs, gt_hms, gt_poses, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index, pose_filename = compute_fn(self.model, batch, self.temporal_steps, device=self.device)
+            inp_batch_size, outputs, gt_hms, gt_poses, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index, pose_filename = compute_fn_v2(self.model, batch, self.temporal_steps, device=self.device)
 
             meta = {'j3d': gt_poses, 'j2d': gt_j2d, 'vis_j2d': vis_j2d, 'vis_j3d': vis_j3d}
             
-            pred_poses_2d = camera_to_j2d_batch(outputs['abs_poses'].view(-1, 16, 3), self.image_size)
-            gt_poses_2d = camera_to_j2d_batch(gt_poses.view(-1, 16, 3), self.image_size)
+            pred_poses_2d = camera_to_j2d_batch(outputs['abs_poses'].view(-1, 16, 3), self.image_size, self.ocam_model)
+            gt_poses_2d = camera_to_j2d_batch(gt_poses.view(-1, 16, 3), self.image_size, self.ocam_model)
             pred_poses_2d = pred_poses_2d.reshape(outputs['abs_poses'].shape[0], outputs['abs_poses'].shape[1], 16, 2)
             gt_poses_2d = gt_poses_2d.reshape(gt_poses.shape[0], gt_poses.shape[1], 16, 2)
 
@@ -303,16 +311,19 @@ class EventEgoPoseEstimation(LightningModule):
             loss = loss_j3d + loss_j2d + loss_seg + loss_bone_length + loss_heatmaps + loss_j3d_delta
 
             self._update_metrics(loss, loss_j3d_delta, loss_seg, loss_j3d, loss_j2d, loss_heatmaps, 
-                           loss_bone_length, gt_poses, pred_poses, valid_j3d, inp)
+                           loss_bone_length, gt_poses, pred_poses, valid_j3d, inp_batch_size)
 
             end = time.time()
-            
-            # print("Input shape ", inp.shape)
 
+            # self._log_metrics()
+            # self._log_training_progress(batch_idx, inp, end)
+            # print("Input shape ", inp.shape)
+            # self._log_memory_stats(inp)
+            
             if batch_idx % cfg.PRINT_FREQ == 0:
                 self._log_metrics()
-                self._log_memory_stats(inp)
-                self._log_training_progress(batch_idx, inp, end)
+                self._log_training_progress(batch_idx, end)
+                self._log_memory_stats()
 
                 # if int(self.batch_size) < 4:
                 #     n_images = int(self.batch_size)
@@ -339,9 +350,9 @@ class EventEgoPoseEstimation(LightningModule):
         except RuntimeError as e:
             if "out of memory" in str(e):
 
-                # Clear cache and log the OOM event
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
+                # # Clear cache and log the OOM event
+                # if torch.cuda.is_available():
+                #     torch.cuda.empty_cache()
                 logger.warning(f"OOM error in batch {batch_idx}. Skipping batch. Error: {str(e)}")
 
                 dummy_loss = sum([p.sum() * 0.0 for p in self.model.parameters()])
@@ -367,7 +378,7 @@ class EventEgoPoseEstimation(LightningModule):
 
         if vis == False:
             try:
-                inp, outputs, gt_hms, gt_abs_poses_og, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index, pose_filename = compute_fn(self.model, batch, self.temporal_steps, device=self.device)
+                inp_batch_size, outputs, gt_hms, gt_abs_poses_og, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index, pose_filename = compute_fn_v2(self.model, batch, self.temporal_steps, device=self.device)
             except RuntimeError as e:
                 logger.info("Error in batch : {}".format(e))
                 return
@@ -391,7 +402,7 @@ class EventEgoPoseEstimation(LightningModule):
             valid_j3d = valid_j3d.squeeze(1)
 
             val_loss_j3d = self.criterions['j3d'](pred_abs_poses.unsqueeze(0), gt_abs_poses.unsqueeze(0), vis_j3d.unsqueeze(0) * self.wgt_j3d)
-            self.j3d_loss_val.update(val_loss_j3d, inp.size(0))
+            self.j3d_loss_val.update(val_loss_j3d, inp_batch_size)
 
             # process = psutil.Process(os.getpid())
             # # Convert bytes to MB
@@ -478,7 +489,7 @@ class EventEgoPoseEstimation(LightningModule):
 
         self.global_steps = self.global_steps + 1
 
-    def _log_memory_stats(self, inp):
+    def _log_memory_stats(self):
         memory_stats = torch.cuda.memory_stats("cuda:0")
         # logger.info("Batch shape: {}".format(inp.shape))
         logger.info(f"Current allocated memory: {memory_stats['allocated_bytes.all.current'] / (1024 ** 2):.2f} MB")
@@ -487,19 +498,19 @@ class EventEgoPoseEstimation(LightningModule):
         logger.info(f"Peak reserved memory: {memory_stats['reserved_bytes.all.peak'] / (1024 ** 2):.2f} MB")
     
     def _update_metrics(self, loss, loss_j3d_delta, loss_seg, loss_j3d, loss_j2d, loss_heatmaps, 
-                   loss_bone_length, gt_poses, pred_poses, valid_j3d, inp):
+                   loss_bone_length, gt_poses, pred_poses, valid_j3d, inp_batch_size):
         avg_acc, cnt = accuracy(gt_poses, pred_poses, valid_j3d)
-        
-        self.j3d_delta_losses.update(loss_j3d_delta.detach().cpu(), inp.size(0))
-        self.seg_losses.update(loss_seg.detach().cpu(), inp.size(0))
-        self.j3d_losses.update(loss_j3d.detach().cpu(), inp.size(0))
-        self.j2d_losses.update(loss_j2d.detach().cpu(), inp.size(0))
-        self.heatmap_losses.update(loss_heatmaps.detach().cpu(), inp.size(0))
-        self.bone_length_losses.update(loss_bone_length.detach().cpu(), inp.size(0))
-        self.losses.update(loss.detach().cpu(), inp.size(0))
+
+        self.j3d_delta_losses.update(loss_j3d_delta, inp_batch_size)
+        self.seg_losses.update(loss_seg, inp_batch_size)
+        self.j3d_losses.update(loss_j3d, inp_batch_size)
+        self.j2d_losses.update(loss_j2d, inp_batch_size)
+        self.heatmap_losses.update(loss_heatmaps, inp_batch_size)
+        self.bone_length_losses.update(loss_bone_length, inp_batch_size)
+        self.losses.update(loss, inp_batch_size)
         self.acc.update(avg_acc, cnt)
 
-    def _log_training_progress(self, batch_idx, inp, end):
+    def _log_training_progress(self, batch_idx, end):
         self.batch_time.update(time.time() - end)
         
         msg = 'Epoch: [{0}][{1}/{2}]\t' \

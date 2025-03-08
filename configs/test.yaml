@@ -42,10 +42,10 @@ model:
     training_type: pretrain #pretrain #pretrain #finetune #pretrain # finetune
     use_bg_augmentation: true
     temporal_steps: 10
-    sample_step: 10
+    sample_step: 5
     merge_frames: 3
     batch_size: 6
-    workers: 14
+    workers: 56
 
 
 
@@ -54,17 +54,18 @@ model:
 
 trainer:
   accelerator: gpu
-  max_epochs: 20
+  max_epochs: 1
   check_val_every_n_epoch: 1
   devices: 1
   # num_nodes: 2
   benchmark: false
-  # precision: 16-mixed
+  profiler: advanced
+  # precision: bf16-mixed
   strategy: ddp_find_unused_parameters_true
   # strategy: ddp
-  fast_dev_run: false
-  # limit_train_batches: 10000
-  limit_val_batches: 200
+  fast_dev_run: true
+  # limit_train_batches: 200
+  limit_val_batches: 10
   # every_n_train_steps: 200
   # gradient_clip_val: 5
   # gradient_clip_algorithm: norm
