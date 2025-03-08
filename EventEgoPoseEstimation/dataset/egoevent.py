@@ -90,32 +90,32 @@ class SingleSequenceDataset(Joints3DDataset):
                 'rgb_frame_index': int(rgb_frame_index)
             }
     
-    def __init__(self, cfg, data_path, is_train, split, temporal_bins, augmentation=False):
-        super().__init__(cfg, data_path, is_train, temporal_bins)
+    def __init__(self, cfg, preprocessed_item_path, dataset_item_path, is_train, split, temporal_bins, augmentation=False):
+        super().__init__(cfg, dataset_item_path, is_train, temporal_bins)
 
         if cfg.DATASET.TYPE == 'Synthetic':
-            dataset = SyntheticEventStream(data_path, cfg, split, is_train, augmentation)
+            dataset = SyntheticEventStream(preprocessed_item_path, dataset_item_path, cfg, split, is_train, augmentation)
         else:
-            dataset = RealEventStream(data_path, cfg, split, is_train, augmentation)
+            dataset = RealEventStream(preprocessed_item_path, dataset_item_path, cfg, split, is_train, augmentation)
         
-        self.data_path = data_path
+        self.data_path = dataset_item_path
         self.split = split
 
         self.dataset = dataset
-        width, height = dataset.width, dataset.height
+        # width, height = dataset.width, dataset.height
         self.num_joints = cfg.NUM_JOINTS
 
-        self.width = width
-        self.height = height
+        # self.width = width
+        # self.height = height
 
         self.temporal_bins = temporal_bins
 
-        self.repr = get_representation(cfg, width, height, temporal_bins, augmentation)
+        # self.repr = get_representation(cfg, width, height, temporal_bins, augmentation)
 
-        self.visualize = self.repr.visualize
+        # self.visualize = self.repr.visualize
 
         print("Loading data for split : ", self.split)
-        print(f'{data_path} => load {len(self.dataset)} samples')
+        print(f'{self.data_path} => load {len(self.dataset)} samples')
 
         self.is_train = is_train
 
@@ -131,7 +131,9 @@ class SingleSequenceDataset(Joints3DDataset):
         else:
             kwargs = {}
                 
-        data_batch, pose_filename = self.dataset[idx, kwargs]
+        data_batch, frame_id, pose_filename = self.dataset[idx, kwargs]
+
+        # print("Frame ID : ", frame_id)
                 
         if len(data_batch) == 0:
             raise StopIteration
@@ -143,19 +145,19 @@ class SingleSequenceDataset(Joints3DDataset):
         #     choices = np.random.choice(np.arange(n_events), choice_len, replace=False)
         #     data_batch = data_batch[choices, :]
 
-        data = self.repr(data_batch)
+        # data = self.repr(data_batch)
         # frame_index = data['frame_index']
-        frame_indexes = data['frame_index']
+        # frame_indexes = data['frame_index']
 
-        anno = self.dataset.get_annoation(frame_indexes)
+        anno = self.dataset.get_annoation(frame_id)
         anno = self.prepare_anno(anno)
         anno['pose_filename'] = pose_filename
 
-        return self.transform(data, anno, kwargs)
+        return self.transform(data_batch, frame_id, anno, kwargs)
 
 
 class EgoEvent(Dataset): 
-    def __init__(self, cfg, split, temporal_bins, finetune=False):
+    def __init__(self, cfg, processed_input_path, dataset_path, split, temporal_bins, finetune=False):
         super().__init__()
 
         cfg = copy.deepcopy(cfg)
@@ -163,29 +165,33 @@ class EgoEvent(Dataset):
         if finetune:
             cfg.DATASET.TYPE = 'Real'
             
-        if cfg.DATASET.TYPE == 'Synthetic':
-            dataset_root = Path(cfg.DATASET.SYN_ROOT)
-            # TODO: get this path from config
-            split_root_path = dataset_root
-            test_path = Path("/CT/EventEgo3Dv2/work/EventEgo3Dv2/dataset_splits/test")
-            # split_root_path = Path("/CT/EventEgo3Dv2/work/EventEgo3Dv2/dataset_splits/test")
+        # if cfg.DATASET.TYPE == 'Synthetic':
+        #     dataset_root = Path(cfg.DATASET.SYN_ROOT)
+        #     # TODO: get this path from config
+        #     split_root_path = dataset_root
+        #     # test_path = Path("/CT/EventEgo3Dv2/work/EventEgo3Dv2/dataset_splits/test")
+        #     # split_root_path = Path("/CT/EventEgo3Dv2/work/EventEgo3Dv2/dataset_splits/test")
 
-        else:
-            dataset_root = Path(cfg.DATASET.REAL_ROOT)
-            # TODO: Update this path
-            split_root_path = dataset_root
+        # else:
+        #     dataset_root = Path(cfg.DATASET.REAL_ROOT)
+        #     # TODO: Update this path
+        #     split_root_path = dataset_root
 
         
-        generate_path_split(split_root_path, cfg)
+        # generate_path_split(split_root_path, cfg)
+
+        dataset_path = Path(dataset_path)
+        processed_input_path = Path(processed_input_path)
+
 
         assert split in ['train', 'val', 'test']
 
         if split == 'train':
-            split_path = split_root_path / 'train.txt'
+            split_path = processed_input_path / 'train.txt'
         elif split == 'val':
-            split_path = split_root_path / 'val.txt'
+            split_path = processed_input_path / 'val.txt'
         elif split == 'test':
-            split_path = test_path / 'test.txt'
+            split_path = processed_input_path / 'test.txt'
             
         with open(split_path, 'r') as f:
             self.items = f.read().splitlines()
@@ -199,19 +205,20 @@ class EgoEvent(Dataset):
     
         datasets = list()
         for item in self.items:
-            data_path = dataset_root / item
-            dataset = SingleSequenceDataset(cfg, data_path, is_train, split, temporal_bins=temporal_bins)
+            dataset_item_path = dataset_path / item
+            preprocessed_item_path = processed_input_path / split / item
+            dataset = SingleSequenceDataset(cfg, preprocessed_item_path, dataset_item_path, is_train, split, temporal_bins=temporal_bins)
             if dataset.isvalid():
-                self.visualize = dataset.visualize
+                # self.visualize = dataset.visualize
                 datasets.append(dataset)
             
         self.datasets = datasets
         self.lengths = [len(dataset) for dataset in datasets]
         self.total_length = sum(self.lengths)
 
-        self.dataset_root = dataset_root
+        self.dataset_root = dataset_path
         
-        print(f'Dataset root: {dataset_root}, split: {split}, finetune: {finetune}')
+        print(f'Dataset root: {self.dataset_root}, split: {split}, finetune: {finetune}')
         print('Datasets: ')
         for dataset in datasets:
             print(dataset.data_path)

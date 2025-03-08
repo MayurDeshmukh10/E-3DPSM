@@ -58,8 +58,8 @@ config.DATASET.REAL_ROOT = '/CT/datasets07/nobackup/EE3D-R/Real_Dataset'
 # config.DATASET.SYN_ROOT = '/scratch/inf0/user/mdeshmuk/EE3D-S'
 # config.DATASET.SYN_TEST_ROOT = '/scratch/inf0/user/mdeshmuk/EE3D-S-Test'
 
-config.DATASET.SYN_ROOT = '/CT/datasets07/nobackup/EE3D-S'
-config.DATASET.SYN_TEST_ROOT = '/CT/datasets07/nobackup/EE3D-S-Test'
+config.DATASET.SYN_ROOT = '/scratch/inf0/user/mdeshmuk/EE3D-preprocessed/EE3D-S'
+# config.DATASET.SYN_TEST_ROOT = '/CT/datasets07/nobackup/EE3D-S-Test'
 
 config.DATASET.BACKGROUND_DATASET_ROOT = '/CT/datasets07/nobackup/EE3D-R/Background_Dataset'
 

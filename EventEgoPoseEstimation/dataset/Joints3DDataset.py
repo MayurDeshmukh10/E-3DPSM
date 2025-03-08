@@ -32,12 +32,14 @@ class Joints3DDataset(Dataset):
     def __len__(self,):
         raise NotImplementedError
 
-    def transform(self, data, anno, kwargs):        
-        frame_index = data['frame_index']
+    def transform(self, data, frame_index, anno, kwargs):        
+        # frame_index = data['frame_index']
+        frame_index = frame_index
+
         rgb_frame_index = anno['rgb_frame_index']
         pose_filename = anno['pose_filename']
         
-        inp = data['input']    
+        inp = data  
         
         # coord_x = data['coord_x']
         # coord_y = data['coord_y']

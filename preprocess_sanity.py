@@ -16,7 +16,7 @@ def find_folders_missing_meta(root_dir):
     return missing_meta_folders
 
 if __name__ == "__main__":
-    train_directory = '/scratch/inf0/user/mdeshmuk/EE3D-preprocessed/EE3D-S/val'
+    train_directory = '/scratch/inf0/user/mdeshmuk/EE3D-preprocessed/EE3D-S/train'
     
     missing_folders = find_folders_missing_meta(train_directory)
     

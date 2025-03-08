@@ -6,67 +6,91 @@ from EventEgoPoseEstimation.dataset import transforms
 from configs.settings import config
 
 class TemoralWrapper(Dataset):
-    def __init__(self, dataset, timesteps, split, sample_step, merge_frames) -> None:
+    def __init__(self, dataset, timesteps, split, sample_step) -> None:
         super().__init__()
 
         self.dataset = dataset
         self.timesteps = timesteps
         self.sample_step = sample_step
         self.split = split
-        self.merge_frames = merge_frames
+        # self.merge_frames = merge_frames
     
     def __len__(self):
-        if self.split == 'train':
-            return len(self.dataset) // (self.sample_step) # * self.merge_frames)
-        else:
-            return len(self.dataset)
-    
-    def __getitem__(self, idx):
-        kwargs = {}
-
-        # print("Idx")
         # if self.split == 'train':
-        #     real_idx = idx * self.sample_step
+        #     return len(self.dataset) // (self.sample_step) # * self.merge_frames)
         # else:
-        #     real_idx = idx
+        return len(self.dataset)
+    
+    # def __getitem__(self, idx):
+    #     kwargs = {}
 
-        # if self.merge_frames > 0:
-        #     # print("self.sample_step: ", self.sample_step)
+    #     # print("Idx")
+    #     # if self.split == 'train':
+    #     #     real_idx = idx * self.sample_step
+    #     # else:
+    #     #     real_idx = idx
 
-        #     real_idx = max(real_idx * self.merge_frames, len(self.dataset) 
-        #     kwargs['merge_frames'] = self.merge_frames
+    #     # if self.merge_frames > 0:
+    #     #     # print("self.sample_step: ", self.sample_step)
+
+    #     #     real_idx = max(real_idx * self.merge_frames, len(self.dataset) 
+    #     #     kwargs['merge_frames'] = self.merge_frames
 
         
-        # print(f"real_idx: {real_idx}")
+    #     # print(f"real_idx: {real_idx}")
 
-        # start_index = max(0, real_idx - self.timesteps)
-        # # start_index = max(0, anchor - (self.timesteps - 1) * 10)
-        # end_index = real_idx
+    #     # start_index = max(0, real_idx - self.timesteps)
+    #     # # start_index = max(0, anchor - (self.timesteps - 1) * 10)
+    #     # end_index = real_idx
         
-        # end_index += self.timesteps - (end_index - start_index)
+    #     # end_index += self.timesteps - (end_index - start_index)
 
-        if self.merge_frames > 1:
-            kwargs['merge_frames'] = self.merge_frames
+    #     # if self.merge_frames > 1:
+    #     #     kwargs['merge_frames'] = self.merge_frames
 
-        if self.split == 'train':
-            start_index = idx * self.sample_step
-        else:
-            start_index = idx
+    #     # if self.split == 'train':
+    #     #     start_index = idx * self.sample_step
+    #     # else:
+    #     start_index = idx
 
-        end_index = start_index + (self.timesteps * self.merge_frames) - 1
+    #     # end_index = start_index + (self.timesteps * self.merge_frames) - 1
+    #     end_index = start_index + (self.timesteps) - 1
+
 
     
-        data = []
-        # print(f"start_index: {start_index}, end_index: {end_index}")
-        for i in range(start_index, end_index + 1):
-            try:
-                batch_data = self.dataset[i, kwargs]
-                data.append(batch_data)
-            except Exception as e:
-                print("Error in getting data ", e)
-                # print("Error in getting data")
-                continue
+    #     data = []
+    #     # print(f"start_index: {start_index}, end_index: {end_index}")
+    #     for i in range(start_index, end_index + 1):
+    #         # try:
+    #         batch_data = self.dataset[i, kwargs]
+    #         data.append(batch_data)
+    #         # except Exception as e:
+    #             # print("Error in getting data ", e)
+    #             # print("Error in getting data")
+    #             # continue
 
+    #     return data
+
+    def __getitem__(self, idx):
+        start_index = max(0, idx - self.timesteps)
+        end_index = idx
+        
+        end_index += self.timesteps - (end_index - start_index)
+
+        kwargs = {'start_index': idx}
+        # if self.augment:
+        #     # kwargs['augment'] = True	
+        
+        #     # kwargs['A'] = self.get_random_transform()
+        #     # kwargs['flip_lr'] = self.get_random_flip_lr()
+
+        #     kwargs['flip_axis'] = self.get_random_flip_axis()    
+            
+        data = []
+        for i in range(start_index, end_index): 
+            kwargs['offset_index'] = i - start_index
+            data.append(self.dataset[i, kwargs])
+            
         return data
 
     def visualize(self, *args, **kwargs):

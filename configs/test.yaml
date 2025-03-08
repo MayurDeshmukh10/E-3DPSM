@@ -9,7 +9,7 @@ model:
       input_channel: 20 #36 (works well in vis) #18 #12 #18
       posenet_input_channel: 20
       image_size: [256, 192]
-      batch_size: 6 #16 # 9 # individual batch size
+      batch_size: 9 #16 # 9 # individual batch size
       #heatmap_size: [config.MODEL.IMAGE_SIZE[0] // config.MODEL.HEAT_MAP_SCALE, config.MODEL.IMAGE_SIZE[1] // config.MODEL.HEAT_MAP_SCALE] TODO: fix this
     
     # dataset_cfg:
@@ -40,12 +40,18 @@ model:
 
     dataset_type:  synthetic #synthetic #synthetic # real
     training_type: pretrain #pretrain #pretrain #finetune #pretrain # finetune
-    use_bg_augmentation: true
+    use_bg_augmentation: false
     temporal_steps: 10
     sample_step: 5
-    merge_frames: 3
-    batch_size: 6
-    workers: 56
+    batch_size: 9
+    workers: 14
+
+    dataset:
+      syn_preprocessed_input_path: /scratch/inf0/user/mdeshmuk/EE3D-preprocessed/EE3D-S
+      real_preprocessed_input_path: "" 
+      syn_dataset_root_path: /CT/datasets07/nobackup/EE3D-S
+      syn_test_dataset_root_path: /CT/datasets07/nobackup/EE3D-S-Test
+      real_dataset_root_path: /CT/datasets07/nobackup/EE3D-R/Real_Dataset
 
 
 
@@ -65,7 +71,7 @@ trainer:
   # strategy: ddp
   fast_dev_run: true
   # limit_train_batches: 200
-  limit_val_batches: 10
+  # limit_val_batches: 100
   # every_n_train_steps: 200
   # gradient_clip_val: 5
   # gradient_clip_algorithm: norm

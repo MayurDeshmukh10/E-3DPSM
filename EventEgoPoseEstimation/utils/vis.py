@@ -317,8 +317,8 @@ def dump_sketelon_image(gt_j3d, pred_j3d, file_name):
     if pred_node is not None:
         scene.remove_node(pred_node)
 
-    return color
-    # cv2.imwrite(file_name, color)
+    # return color
+    cv2.imwrite(file_name, color)
 
     # skeleton = Skeleton((0.9, 0.1, 0.1))
     # node = None
@@ -613,13 +613,13 @@ def save_pose_images(pred_poses_2d, gt_poses_2d, output_folder, mask_images=None
     if isinstance(gt_poses_2d, torch.Tensor):
         gt_poses_2d = gt_poses_2d.cpu().numpy()
 
-    B, T, num_points, coord = pred_poses_2d.shape  # e.g. 10,6,16,2
+    T, B, num_points, coord = pred_poses_2d.shape  # e.g. 10,6,16,2
 
-    for b in range(B):
-        for t in range(T):
+    for t in range(T):
+        for b in range(B):
             fig, ax = plt.subplots(figsize=(6,6))
 
-            mask_image = mask_images[b, t, :, :].squeeze(0)
+            mask_image = mask_images[t, b, :, :].squeeze(0)
             
             # Use provided mask_image if available, else set white background.
             if mask_image is not None:
@@ -628,8 +628,8 @@ def save_pose_images(pred_poses_2d, gt_poses_2d, output_folder, mask_images=None
                 ax.set_facecolor('white')
             
             # Extract the 16x2 keypoint arrays for the current batch and time
-            pred_points = pred_poses_2d[b, t, :, :]  # shape: (16, 2)
-            gt_points = gt_poses_2d[b, t, :, :]        # shape: (16, 2)
+            pred_points = pred_poses_2d[t, b, :, :]  # shape: (16, 2)
+            gt_points = gt_poses_2d[t, b, :, :]        # shape: (16, 2)
             
             # Plot ground truth points in blue (circles) and predictions in red (x markers)
             ax.scatter(gt_points[:, 0], gt_points[:, 1], c='blue', label='GT', s=40)

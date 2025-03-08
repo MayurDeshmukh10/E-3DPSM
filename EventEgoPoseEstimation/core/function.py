@@ -341,6 +341,69 @@ def compute_fn_v2(model, batch, temporal_steps, device='cuda'):
     # T, B, N, C = inps.shape
     return (len(inps) * len(inps[0])), outputs, gt_hms, gt_j3d, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index, filename
 
+def compute_fn_v3(model, batch, prev_buffer=None, prev_key=None, batch_first=False):
+    inps = []
+
+    frame_index = []
+    gt_hms = []
+    gt_j2d = []
+    gt_j3d = []
+    gt_seg = []
+    vis_j2d = []
+    vis_j3d = []
+    valid_j3d = []
+    valid_seg = []
+    filename = []
+    for (data, meta) in batch:
+        inp = data['x']
+        inps.append(inp[None, ...])    
+
+        gt_hms_ = data['hms']
+        gt_j3d_ = data['j3d'] 
+        gt_seg_ = data['segmentation_mask']
+
+        gt_j2d_ = meta['j2d']
+
+        vis_j2d_ = meta['vis_j2d']
+        vis_j3d_ = meta['vis_j3d']
+        valid_j3d_ = meta['valid_j3d']
+        valid_seg_ = meta['valid_seg']
+        frame_index_ = meta['frame_index']
+        filename_ = meta['pose_filename']
+        
+
+        gt_hms.append(gt_hms_)
+        gt_j3d.append(gt_j3d_)
+        gt_seg.append(gt_seg_)
+
+        gt_j2d.append(gt_j2d_)
+        vis_j2d.append(vis_j2d_)
+        vis_j3d.append(vis_j3d_)
+        valid_j3d.append(valid_j3d_)
+        valid_seg.append(valid_seg_)
+        filename.append(filename_)
+
+        frame_index.append(frame_index_)
+
+    del batch
+
+    inps = torch.cat(inps, dim=0)
+
+    gt_hms = torch.stack(gt_hms)
+    gt_j3d = torch.stack(gt_j3d)
+    gt_seg = torch.stack(gt_seg)
+
+    gt_j2d = torch.stack(gt_j2d)
+    vis_j2d = torch.stack(vis_j2d)
+    vis_j3d = torch.stack(vis_j3d)
+    valid_j3d = torch.stack(valid_j3d)
+    valid_seg = torch.stack(valid_seg)
+    frame_index = torch.stack(frame_index)
+
+    outputs = model(inps, augmentation_data={})
+    
+    T, B, C, H, W = inps.shape
+    return inps.view(T * B, C, H, W), outputs, gt_hms, gt_j3d, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index, filename
 
 def percentile(t, q):
     B, C, H, W = t.shape

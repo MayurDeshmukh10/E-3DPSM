@@ -8,187 +8,187 @@ from EventEgoPoseEstimation.utils.vis import visualize_temporal_bins
 from EventEgoPoseEstimation.dataset.dataset_utils import event_augmentation, save_augmented_data, event_augmentation_v2
 
 
-class ValueLayer(nn.Module):
-    def __init__(self, mlp_layers, activation=nn.ReLU(), num_channels=9):
-        assert mlp_layers[-1] == 1, "Last layer of the mlp must have 1 input channel."
-        assert mlp_layers[0] == 1, "First layer of the mlp must have 1 output channel"
+# class ValueLayer(nn.Module):
+#     def __init__(self, mlp_layers, activation=nn.ReLU(), num_channels=9):
+#         assert mlp_layers[-1] == 1, "Last layer of the mlp must have 1 input channel."
+#         assert mlp_layers[0] == 1, "First layer of the mlp must have 1 output channel"
 
-        nn.Module.__init__(self)
-        self.mlp = nn.ModuleList()
-        self.activation = activation
+#         nn.Module.__init__(self)
+#         self.mlp = nn.ModuleList()
+#         self.activation = activation
 
-        # create mlp
-        in_channels = 1
-        for out_channels in mlp_layers[1:]:
-            self.mlp.append(nn.Linear(in_channels, out_channels))
-            in_channels = out_channels
+#         # create mlp
+#         in_channels = 1
+#         for out_channels in mlp_layers[1:]:
+#             self.mlp.append(nn.Linear(in_channels, out_channels))
+#             in_channels = out_channels
 
-        # init with trilinear kernel
-        path = join(dirname(__file__), "quantization_layer_init", f"{num_channels}_trilinear_init.pth")
-        if isfile(path):
-            state_dict = torch.load(path)
-            self.load_state_dict(state_dict)
-        else:
-            self.init_kernel(num_channels)
+#         # init with trilinear kernel
+#         path = join(dirname(__file__), "quantization_layer_init", f"{num_channels}_trilinear_init.pth")
+#         if isfile(path):
+#             state_dict = torch.load(path)
+#             self.load_state_dict(state_dict)
+#         else:
+#             self.init_kernel(num_channels)
 
-    def forward(self, x):
-        # create sample of batchsize 1 and input channels 1
-        x = x[None,...,None]
+#     def forward(self, x):
+#         # create sample of batchsize 1 and input channels 1
+#         x = x[None,...,None]
 
-        # apply mlp convolution
-        for i in range(len(self.mlp[:-1])):
-            x = self.activation(self.mlp[i](x))
+#         # apply mlp convolution
+#         for i in range(len(self.mlp[:-1])):
+#             x = self.activation(self.mlp[i](x))
 
-        x = self.mlp[-1](x)
-        x = x.squeeze()
+#         x = self.mlp[-1](x)
+#         x = x.squeeze()
 
-        return x
+#         return x
 
-    def init_kernel(self, num_channels):
-        ts = torch.zeros((1, 2000))
-        optim = torch.optim.Adam(self.parameters(), lr=1e-2)
+#     def init_kernel(self, num_channels):
+#         ts = torch.zeros((1, 2000))
+#         optim = torch.optim.Adam(self.parameters(), lr=1e-2)
 
-        torch.manual_seed(1)
+#         torch.manual_seed(1)
 
-        for _ in range(1000):  # converges in a reasonable time
-            optim.zero_grad()
+#         for _ in range(1000):  # converges in a reasonable time
+#             optim.zero_grad()
 
-            ts.uniform_(-1, 1)
+#             ts.uniform_(-1, 1)
 
-            # gt
-            gt_values = self.trilinear_kernel(ts, num_channels)
+#             # gt
+#             gt_values = self.trilinear_kernel(ts, num_channels)
 
-            # pred
-            values = self.forward(ts)
+#             # pred
+#             values = self.forward(ts)
 
-            # optimize
-            loss = (values - gt_values).pow(2).sum()
+#             # optimize
+#             loss = (values - gt_values).pow(2).sum()
 
-            loss.backward()
-            optim.step()
+#             loss.backward()
+#             optim.step()
         
-        save_path = join(dirname(__file__), "quantization_layer_init", f"{num_channels}_trilinear_init.pth")
-        torch.save(self.state_dict(), save_path)
+#         save_path = join(dirname(__file__), "quantization_layer_init", f"{num_channels}_trilinear_init.pth")
+#         torch.save(self.state_dict(), save_path)
 
 
-    def trilinear_kernel(self, ts, num_channels):
-        gt_values = torch.zeros_like(ts)
+#     def trilinear_kernel(self, ts, num_channels):
+#         gt_values = torch.zeros_like(ts)
 
-        gt_values[ts > 0] = (1 - (num_channels-1) * ts)[ts > 0]
-        gt_values[ts < 0] = ((num_channels-1) * ts + 1)[ts < 0]
+#         gt_values[ts > 0] = (1 - (num_channels-1) * ts)[ts > 0]
+#         gt_values[ts < 0] = ((num_channels-1) * ts + 1)[ts < 0]
 
-        gt_values[ts < -1.0 / (num_channels-1)] = 0
-        gt_values[ts > 1.0 / (num_channels-1)] = 0
+#         gt_values[ts < -1.0 / (num_channels-1)] = 0
+#         gt_values[ts > 1.0 / (num_channels-1)] = 0
 
-        return gt_values
+#         return gt_values
 
 
-class QuantizationLayer(nn.Module):
-    def __init__(self, dim,
-                 batch_size,
-                 mlp_layers=[1, 100, 100, 1],
-                 activation=nn.LeakyReLU(negative_slope=0.1)):
-        nn.Module.__init__(self)
-        self.value_layer = ValueLayer(mlp_layers,
-                                      activation=activation,
-                                      num_channels=dim[0])
-        self.dim = dim
-        self.batch_size = batch_size
+# class QuantizationLayer(nn.Module):
+#     def __init__(self, dim,
+#                  batch_size,
+#                  mlp_layers=[1, 100, 100, 1],
+#                  activation=nn.LeakyReLU(negative_slope=0.1)):
+#         nn.Module.__init__(self)
+#         self.value_layer = ValueLayer(mlp_layers,
+#                                       activation=activation,
+#                                       num_channels=dim[0])
+#         self.dim = dim
+#         self.batch_size = batch_size
 
-    def forward(self, events_list, device):
+#     def forward(self, events_list, device):
 
-        B = len(events_list)
+#         B = len(events_list)
 
-        num_voxels = int(2 * np.prod(self.dim) * B)
-        # vox = events_list[0][0].new_full([num_voxels,], fill_value=0)
-        vox = torch.zeros(num_voxels, device=device)
+#         num_voxels = int(2 * np.prod(self.dim) * B)
+#         # vox = events_list[0][0].new_full([num_voxels,], fill_value=0)
+#         vox = torch.zeros(num_voxels, device=device)
 
-        C, H, W = self.dim
+#         C, H, W = self.dim
 
-        # x_values = [events[:, 0] for events in events_list]
-        # y_values = [events[:, 1] for events in events_list]
-        # t_values = [events[:, 2] for events in events_list]
-        # p_values = [events[:, 3] for events in events_list]
-        # b_values = [i * torch.ones((len(events)), device=device) for i, events in enumerate(events_list)]
+#         # x_values = [events[:, 0] for events in events_list]
+#         # y_values = [events[:, 1] for events in events_list]
+#         # t_values = [events[:, 2] for events in events_list]
+#         # p_values = [events[:, 3] for events in events_list]
+#         # b_values = [i * torch.ones((len(events)), device=device) for i, events in enumerate(events_list)]
         
 
-        # x = torch.cat(x_values, dim=0)
-        # y = torch.cat(y_values, dim=0)
-        # t = torch.cat(t_values, dim=0)
-        # p = torch.cat(p_values, dim=0)
-        # b = torch.cat(b_values, dim=0)
+#         # x = torch.cat(x_values, dim=0)
+#         # y = torch.cat(y_values, dim=0)
+#         # t = torch.cat(t_values, dim=0)
+#         # p = torch.cat(p_values, dim=0)
+#         # b = torch.cat(b_values, dim=0)
 
-        # p = (p+1)/2  # maps polarity to 0, 1
+#         # p = (p+1)/2  # maps polarity to 0, 1
 
-        # x_idx = x
-        # y_idx = W * y
-        # channel_offset = W * H * C * p
-        # batch_offset = W * H * C * 2 * b
+#         # x_idx = x
+#         # y_idx = W * y
+#         # channel_offset = W * H * C * p
+#         # batch_offset = W * H * C * 2 * b
 
-        # # Summing to get final index
-        # idx_before_bins = x_idx + y_idx + channel_offset + batch_offset
+#         # # Summing to get final index
+#         # idx_before_bins = x_idx + y_idx + channel_offset + batch_offset
 
-        x = torch.cat([events[:, 0] for events in events_list], dim=0)
-        y = torch.cat([events[:, 1] for events in events_list], dim=0)
-        t = torch.cat([events[:, 2] for events in events_list], dim=0)
-        p = torch.cat([(events[:, 3] + 1) / 2 for events in events_list], dim=0)  # Map polarity to 0, 1
-        b = torch.cat([i * torch.ones(len(events), device=device) for i, events in enumerate(events_list)], dim=0)
+#         x = torch.cat([events[:, 0] for events in events_list], dim=0)
+#         y = torch.cat([events[:, 1] for events in events_list], dim=0)
+#         t = torch.cat([events[:, 2] for events in events_list], dim=0)
+#         p = torch.cat([(events[:, 3] + 1) / 2 for events in events_list], dim=0)  # Map polarity to 0, 1
+#         b = torch.cat([i * torch.ones(len(events), device=device) for i, events in enumerate(events_list)], dim=0)
 
-        # Precompute base indices components
-        idx_before_bins = (x + W * y + (W * H * C) * p + (W * H * C * 2) * b)
-        wh = W * H  # Precompute to avoid repeated calculation
+#         # Precompute base indices components
+#         idx_before_bins = (x + W * y + (W * H * C) * p + (W * H * C * 2) * b)
+#         wh = W * H  # Precompute to avoid repeated calculation
 
-        # Loop through bins to compute values and accumulate in voxel grid
-        for i_bin in range(C):
-            values = t * self.value_layer.forward(t - i_bin / (C - 1))
-            # values = t * self.value_layer.trilinear_kernel((t - i_bin / (C - 1)), 5)
+#         # Loop through bins to compute values and accumulate in voxel grid
+#         for i_bin in range(C):
+#             values = t * self.value_layer.forward(t - i_bin / (C - 1))
+#             # values = t * self.value_layer.trilinear_kernel((t - i_bin / (C - 1)), 5)
 
-            # Calculate final index for this bin
-            idx = idx_before_bins + W * H * i_bin
+#             # Calculate final index for this bin
+#             idx = idx_before_bins + W * H * i_bin
 
-            # Ensure idx is within bounds
-            if (idx < 0).any() or (idx >= num_voxels).any():
-                print(f"Out-of-bounds indices detected: min={idx.min()}, max={idx.max()}, expected range=[0, {num_voxels-1}]")
-                idx = idx.clamp(0, num_voxels - 1)  # Clamp values within bounds
+#             # Ensure idx is within bounds
+#             if (idx < 0).any() or (idx >= num_voxels).any():
+#                 print(f"Out-of-bounds indices detected: min={idx.min()}, max={idx.max()}, expected range=[0, {num_voxels-1}]")
+#                 idx = idx.clamp(0, num_voxels - 1)  # Clamp values within bounds
 
-            # Accumulate values in the voxel grid
-            # vox.put_(idx.long(), values, accumulate=True)
-            vox.scatter_add_(0, idx.long(), values)
+#             # Accumulate values in the voxel grid
+#             # vox.put_(idx.long(), values, accumulate=True)
+#             vox.scatter_add_(0, idx.long(), values)
 
-        vox = vox.view(-1, 2, C, H, W)
-        vox = torch.cat([vox[:, 0, ...], vox[:, 1, ...]], 1)
+#         vox = vox.view(-1, 2, C, H, W)
+#         vox = torch.cat([vox[:, 0, ...], vox[:, 1, ...]], 1)
 
-        return vox
+#         return vox
 
-class EROS(nn.Module):
-    def  __init__(self, inp_chn, width, height, batch_size) -> None:
-        super(EROS, self).__init__()
+# class EROS(nn.Module):
+#     def  __init__(self, inp_chn, width, height, batch_size) -> None:
+#         super(EROS, self).__init__()
 
-        self.quantization_layer = QuantizationLayer(
-            dim=(inp_chn, height, width),
-            mlp_layers=[1, 30, 30, 1],  # test and change if necessary
-            activation=nn.LeakyReLU(negative_slope=0.1),
-            batch_size=batch_size
-        )
-        self.width = width
-        self.height = height
+#         self.quantization_layer = QuantizationLayer(
+#             dim=(inp_chn, height, width),
+#             mlp_layers=[1, 30, 30, 1],  # test and change if necessary
+#             activation=nn.LeakyReLU(negative_slope=0.1),
+#             batch_size=batch_size
+#         )
+#         self.width = width
+#         self.height = height
         
-    def forward(self, events_list, device):
-        # events_list = []
-        # for i, event_batch in enumerate(events):
-        #     valid_mask = ~(event_batch == -10).all(dim=1) # remove invalid events
-        #     event_batch = event_batch[valid_mask]
-        #     events_list.append(event_batch)
+#     def forward(self, events_list, device):
+#         # events_list = []
+#         # for i, event_batch in enumerate(events):
+#         #     valid_mask = ~(event_batch == -10).all(dim=1) # remove invalid events
+#         #     event_batch = event_batch[valid_mask]
+#         #     events_list.append(event_batch)
         
-        quantized_events = self.quantization_layer(events_list, device)
+#         quantized_events = self.quantization_layer(events_list, device)
 
-        # visualize_temporal_bins(quantized_events[0], '/CT/EventEgo3Dv2/work/EventEgo3Dv2/visualizations/test/28')
+#         # visualize_temporal_bins(quantized_events[0], '/CT/EventEgo3Dv2/work/EventEgo3Dv2/visualizations/test/28')
 
-        out = quantized_events
-        old_min, old_max, new_min, new_max = out.min(), out.max(), 0, 1
-        out = (out - old_min) * (new_max - new_min) / (old_max - old_min) + new_min
+#         out = quantized_events
+#         old_min, old_max, new_min, new_max = out.min(), out.max(), 0, 1
+#         out = (out - old_min) * (new_max - new_min) / (old_max - old_min) + new_min
 
-        return out
+#         return out
 
 
 class EgoHPE(nn.Module):
@@ -221,7 +221,7 @@ class EgoHPE(nn.Module):
 
         self.batch_size = batch_size
 
-        self.EROS = EROS(inp_chn=self.num_bins, height=self.height, width=self.width, batch_size=self.batch_size)
+        # self.EROS = EROS(inp_chn=self.num_bins, height=self.height, width=self.width, batch_size=self.batch_size)
 
 
     def forward(self, x, augmentation_data, device='cuda'):
@@ -229,8 +229,7 @@ class EgoHPE(nn.Module):
         s5_state = None
         pose = None
 
-        T = len(x)
-        B = len(x[0])
+        T, B, C, H, W = x.shape
       
         delta_poses = []
         poses = []
@@ -257,7 +256,11 @@ class EgoHPE(nn.Module):
         # import pdb; pdb.set_trace()
         for i in range(T):
 
-            out = self.EROS(x[i], device)
+            out = x[i]
+            old_min, old_max, new_min, new_max = out.min(), out.max(), 0, 1
+            out = (out - old_min) * (new_max - new_min) / (old_max - old_min) + new_min
+
+            # out = self.EROS(x[i], device)
 
             # import pdb; pdb.set_trace()
             # if not all(is_empty(inner) for sublist in augmentation_data['bg_data'] for inner in sublist):
