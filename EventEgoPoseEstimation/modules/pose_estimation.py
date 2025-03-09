@@ -315,15 +315,18 @@ class EventEgoPoseEstimation(LightningModule):
 
             loss = loss_j3d + loss_j2d + loss_seg + loss_bone_length + loss_heatmaps + loss_j3d_delta
 
+            if loss.isnan():
+                import pdb; pdb.set_trace()
+
             self._update_metrics(loss, loss_j3d_delta, loss_seg, loss_j3d, loss_j2d, loss_heatmaps, 
                            loss_bone_length, gt_poses, pred_poses, valid_j3d, inps)
 
             end = time.time()
 
             # self._log_metrics()
-            # self._log_training_progress(batch_idx, inp, end)
-            # print("Input shape ", inp.shape)
-            # self._log_memory_stats(inp)
+            # self._log_training_progress(batch_idx, end)
+            # # print("Input shape ", inp.shape)
+            # self._log_memory_stats()
             
             if batch_idx % cfg.PRINT_FREQ == 0:
                 self._log_metrics()

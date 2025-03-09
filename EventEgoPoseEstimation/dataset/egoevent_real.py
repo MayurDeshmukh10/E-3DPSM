@@ -18,18 +18,23 @@ logger = logging.getLogger(__name__)
 
 
 class RealEventStream(Dataset):
-    def __init__(self, data_path, cfg, split, is_train, augmentation):
+    def __init__(self, processed_input_path, data_path, cfg, split, is_train, augmentation):
         super().__init__()
 
         self.data_path = Path(data_path)
 
-        with open(self.data_path / 'event_meta.json', 'r') as f:
+        self.processed_input_path = Path(processed_input_path)
+
+        with open(self.processed_input_path / 'meta.json', 'r') as f:
             meta = json.load(f)
             
-        self.height = meta['height']
-        self.width = meta['width']
+        self.height = 480
+        self.width = 640
+
+        self.total_frames = meta['total_frames']
         
-        self.stream_path = self.data_path / 'events.h5'
+        self.stream_path = self.processed_input_path / 'event_tensor.hdf5'
+
         self.fin = None 
 
         self.local_pose_gt_path = self.data_path / 'synced_local_pose_gt.pickle'
@@ -61,82 +66,11 @@ class RealEventStream(Dataset):
 
         self.filename = self.data_path.name
 
-        if not self.is_augmentation:
-            self.frame_offsets = np.load(f"/scratch/inf0/user/mdeshmuk/EE3D-R-frame-offsets/{split}/{self.data_path.name}.npy")
-            # self.frame_offsets = self.frame_offsets[self.frame_offsets != 0] # This is needed because for some there are zero events
-            # self.cumulative_offsets = np.insert(np.cumsum(self.frame_offsets), 0, 0)
-            # self.num_frames = len(self.frame_offsets)
-
-            valid_mask = self.frame_offsets > 0
-            self.valid_indices = np.where(valid_mask)[0] # valid frame indices where there are events
-            self.cumulative_offsets = np.cumsum(self.frame_offsets)
-            self.cumulative_offsets = np.insert(self.cumulative_offsets, 0, 0)
-            self.num_valid_frames = len(self.valid_indices)
-
     def init_stream(self):
-        self.fin = h5py_File(self.stream_path, 'r')['event']
+        self.fin = h5py_File(self.stream_path, 'r')
         
     def __len__(self):
-        if self.pose_list is None:
-            return 0
-        
-        if self.is_augmentation:
-            with h5py_File(self.stream_path, 'r') as f:
-                return f['event'].shape[0] // self.batch_size
-
-        return self.num_valid_frames # // 10 # Take every 10th frame
-
-    def get_event_batch(self, frame_idx):
-        if self.is_augmentation:
-            num_events = self.batch_size
-            idx = frame_idx * num_events
-
-            # if self.is_train:
-            #     max_frame_time = random.randint(2, self.max_frame_time)
-            # else:
-            max_frame_time = self.max_frame_time
-            
-            frame_time = 0
-            data_batches = []
-            while frame_time < max_frame_time:
-                data_batch = self.fin[idx: idx + num_events] 
-                ts = data_batch[:, 2] 
-
-                # print("ts", ts)
-                
-                if not len(ts): 
-                    break
-
-                ts = (ts[-1] - ts[0]) * 1e-3 # microseconds to milliseconds 
-
-                data_batches.append(data_batch)
-
-                frame_time += ts
-                idx += num_events
-
-            # data_batches = self.fin
-            
-            if len(data_batches) == 0:
-                print("Zero in real")
-                raise StopIteration
-            
-            data_batches_np = np.concatenate(data_batches, axis=0)
-            # data_batches_np = np.array(data_batches)
-            del data_batches
-
-            return data_batches_np, self.filename
-        
-        start = self.cumulative_offsets[frame_idx]
-        end = self.cumulative_offsets[frame_idx + 1]
-        data_batch = self.fin[start:end]
-        
-        # try:
-        #     print("Idx", frame_idx)
-        #     print("Frame index", data_batch[-1, 4])
-        # except:
-        #     print("Problem")
-
-        return np.array(data_batch), self.filename
+        return self.total_frames
     
     def __getitem__(self, idx):
         if self.fin is None: self.init_stream() # Done to ensure multiprocessing works
@@ -146,14 +80,11 @@ class RealEventStream(Dataset):
         else:
             kwargs = {}
 
-        try:
-            actual_frame_idx = self.valid_indices[idx]
-        except AttributeError: # special case for augmentation where we are using real data dataloader
-            actual_frame_idx = idx
+        data_batch = self.fin[str(idx)]['input']
+        frame_id = self.fin[str(idx)]['frame_index'][()]
 
-        data_batch = self.get_event_batch(actual_frame_idx)
-
-        return data_batch
+        data_batch = np.array(data_batch)
+        return data_batch, frame_id, self.filename
 
     def get_annoation(self, index):
         index = int(index)

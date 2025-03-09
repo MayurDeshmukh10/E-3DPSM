@@ -18,7 +18,9 @@ TIME_WINDOW = 20 # in milliseconds
 NUM_EVENTS = 8000 # roughly equivalent to 1 msec
 DS_HEIGHT = 480
 DS_WIDTH = 640
-CHECKPOINT_PATH = "/CT/EventEgo3Dv2/work/EventEgo3Dv2/results/wandb_data/pretraining_new_dataloader_oom_fixed_5_2_2/EventEgo3Dv2/lmm6tavt/checkpoints/last.ckpt"
+# CHECKPOINT_PATH = "/CT/EventEgo3Dv2/work/EventEgo3Dv2/results/wandb_data/pretraining_new_dataloader_oom_fixed_5_2_2/EventEgo3Dv2/lmm6tavt/checkpoints/last.ckpt" # synthetic
+CHECKPOINT_PATH = "/CT/EventEgo3Dv2/work/EventEgo3Dv2/results/wandb_data/finetune_new_dataloader/EventEgo3Dv2/jjt1j9js/checkpoints/last.ckpt" # real
+
 h5py_File = functools.partial(h5py.File, libver='latest', swmr=True)
 
 
@@ -102,6 +104,10 @@ if __name__ == "__main__":
 
         # lnes_vis = lnes.visualize(lnes_data['input'])
         # cv2.imwrite(f'/CT/EventEgo3Dv2/work/EventEgo3Dv2/visualizations/voxel_preprocess/{total_frames}_lnes.png', lnes_vis)
+
+        if np.isnan(lnes_data['input']).any() or np.isnan(raw_events_data['input'].cpu().numpy()).any():
+            print("Nan found in data")
+            continue
         
         lnes_grp = lnes_writer.create_group(str(total_frames))
         lnes_grp.create_dataset('input', data=lnes_data['input'], compression="gzip")
