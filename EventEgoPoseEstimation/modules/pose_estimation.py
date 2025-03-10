@@ -211,19 +211,23 @@ class EventEgoPoseEstimation(LightningModule):
         if stage == "test" or stage == "predict":
             if self.training_type == 'pretrain':
 
-                cfg.DATASET.SYN_ROOT = cfg.DATASET.SYN_TEST_ROOT 
-                cfg.DATASET.TYPE = 'Synthetic'
-                cfg.DATASET.BG_AUG = False
-                cfg.DATASET.TRAIN_TEST_SPLIT = 0
+                # cfg.DATASET.SYN_ROOT = cfg.DATASET.SYN_TEST_ROOT 
+                # cfg.DATASET.TYPE = 'Synthetic'
+                # cfg.DATASET.BG_AUG = False
+                # cfg.DATASET.TRAIN_TEST_SPLIT = 0
+                test_dataset = self.syn_test_dataset_root_path
+                test_preprocessed_input = self.syn_preprocessed_input_path
 
             elif self.training_type == 'finetune':
-                cfg.DATASET.TYPE = 'Real'
-                cfg.DATASET.BG_AUG = False
+                # cfg.DATASET.TYPE = 'Real'
+                # cfg.DATASET.BG_AUG = False
+                test_dataset = self.real_dataset_root_path
+                test_preprocessed_input = self.real_preprocessed_input_path
             else:
                 assert False, f"Invalid training type: {self.training_type}"
  
 
-            test_dataset = EgoEvent(cfg, temporal_bins=self.temporal_bins, split='test')
+            test_dataset = EgoEvent(cfg, test_preprocessed_input, test_dataset, temporal_bins=self.temporal_bins, split='test')
             self.test_dataset = TemoralWrapper(test_dataset, self.temporal_steps, split='test', sample_step=self.sample_step)
 
             # cfg.DATASET.TYPE = 'Synthetic'
@@ -272,8 +276,8 @@ class EventEgoPoseEstimation(LightningModule):
         self.val_dataloader_len = len(dataloader)
         return dataloader
 
-    def on_load_checkpoint(self, checkpoint: dict):
-        checkpoint['optimizer_states'][0]['param_groups'][0]['lr'] =  self.lr
+    # def on_load_checkpoint(self, checkpoint: dict):
+    #     checkpoint['optimizer_states'][0]['param_groups'][0]['lr'] =  self.lr
 
     def training_step(self, batch, batch_idx):
         end = time.time()
@@ -435,21 +439,21 @@ class EventEgoPoseEstimation(LightningModule):
             self.log('val_acc', self.acc_j3d_val.avg, sync_dist=True, batch_size=self.batch_size)
 
             self.all_preds_j3d.append(pred_abs_poses.detach().cpu())
-            self.all_gt_j3ds.append(gt_j3d.detach().cpu())
+            self.all_gt_j3ds.append(gt_abs_poses.detach().cpu())
             self.all_vis_j3d.append(valid_j3d.detach().cpu())
             self.all_frame_indices.append(frame_index.detach().cpu())
 
-            # if batch_idx % cfg.PRINT_FREQ == 0:
+            if batch_idx % cfg.PRINT_FREQ == 0:
 
-            self.global_val_steps = self.global_val_steps + 1
-            
-            msg = 'Test: [{0}/{1}]\t' \
-                'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t' \
-                'MPJPE {acc.val:.4f} ({acc.avg:.4f})\t' \
-                'Val loss  {val_loss.val:.4f} ({val_loss.avg:.4f})\t'.format(
-                    batch_idx, self.trainer.num_val_batches, batch_time=self.batch_time,
-                    acc=self.acc_j3d_val, val_loss=self.j3d_loss_val)
-            logger.info(msg)
+                self.global_val_steps = self.global_val_steps + 1
+                
+                msg = 'Test: [{0}/{1}]\t' \
+                    'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t' \
+                    'MPJPE {acc.val:.4f} ({acc.avg:.4f})\t' \
+                    'Val loss  {val_loss.val:.4f} ({val_loss.avg:.4f})\t'.format(
+                        batch_idx, self.trainer.num_val_batches, batch_time=self.batch_time,
+                        acc=self.acc_j3d_val, val_loss=self.j3d_loss_val)
+                logger.info(msg)
 
                 # try:
                 #     inp = inp.detach().cpu().numpy()
