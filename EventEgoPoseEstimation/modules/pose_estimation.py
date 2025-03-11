@@ -301,7 +301,7 @@ class EventEgoPoseEstimation(LightningModule):
             pred_seg = outputs['seg']
             valid_seg = valid_seg.view(self.temporal_steps, self.batch_size, 1, 1, 1)
             gt_delta_poses = gt_poses[1:, :, :, :] - gt_poses[:-1, :, :, :]
-            pred_heatmaps = outputs['heatmaps']
+            # pred_heatmaps = outputs['heatmaps']
             # self.s5_states = outputs['s5_states']
 
 
@@ -313,13 +313,13 @@ class EventEgoPoseEstimation(LightningModule):
             loss_seg = self.criterions['seg'](pred_seg, gt_seg, valid_seg * self.wgt_seg)
             loss_j3d = self.criterions['j3d'](pred_poses, gt_poses, vis_j3d * self.wgt_j3d)
             loss_j2d = self.criterions['j2d'](pred_poses_2d, gt_poses_2d, vis_j2d * self.wgt_j2d)
-            loss_heatmaps = self.criterions['heatmap'](pred_heatmaps, gt_hms, vis_j2d * self.wgt_heatmap)
+            # loss_heatmaps = self.criterions['heatmap'](pred_heatmaps, gt_hms, vis_j2d * self.wgt_heatmap)
             loss_bone_length = self.criterions['bone_length'](pred_poses, gt_poses, vis_j3d * self.wgt_bone_length)
             # loss_bone_orientations = self.criterions['bone_orientations'](pred_poses, gt_poses)
 
-            loss = loss_j3d + loss_j2d + loss_seg + loss_bone_length + loss_heatmaps + loss_j3d_delta
+            loss = loss_j3d + loss_j2d + loss_seg + loss_bone_length + loss_j3d_delta
 
-            self._update_metrics(loss, loss_j3d_delta, loss_seg, loss_j3d, loss_j2d, loss_heatmaps, 
+            self._update_metrics(loss, loss_j3d_delta, loss_seg, loss_j3d, loss_j2d, 
                            loss_bone_length, gt_poses, pred_poses, valid_j3d, inps)
 
             end = time.time()
@@ -506,7 +506,7 @@ class EventEgoPoseEstimation(LightningModule):
         # logger.info(f"Current reserved memory: {memory_stats['reserved_bytes.all.current'] / (1024 ** 2):.2f} MB")
         logger.info(f"Peak reserved memory: {memory_stats['reserved_bytes.all.peak'] / (1024 ** 2):.2f} MB")
     
-    def _update_metrics(self, loss, loss_j3d_delta, loss_seg, loss_j3d, loss_j2d, loss_heatmaps, 
+    def _update_metrics(self, loss, loss_j3d_delta, loss_seg, loss_j3d, loss_j2d, 
                    loss_bone_length, gt_poses, pred_poses, valid_j3d, inps):
         avg_acc, cnt = accuracy(gt_poses, pred_poses, valid_j3d)
 
@@ -514,7 +514,6 @@ class EventEgoPoseEstimation(LightningModule):
         self.seg_losses.update(loss_seg, inps.size(0))
         self.j3d_losses.update(loss_j3d, inps.size(0))
         self.j2d_losses.update(loss_j2d, inps.size(0))
-        self.heatmap_losses.update(loss_heatmaps, inps.size(0))
         self.bone_length_losses.update(loss_bone_length, inps.size(0))
         self.losses.update(loss, inps.size(0))
         self.acc.update(avg_acc, cnt)
@@ -527,7 +526,6 @@ class EventEgoPoseEstimation(LightningModule):
             'J3D_Loss {j3d_loss.val:.5f} ({j3d_loss.avg:.5f})\t' \
             'SEG_Loss {seg_loss.val:.5f} ({seg_loss.avg:.5f})\t' \
             'J2D_Loss {j2d_loss.val:.5f} ({j2d_loss.avg:.5f})\t' \
-            'Heatmap_Loss {hms_loss.val:.5f} ({hms_loss.avg:.5f})\t' \
             'Bone_Length_Loss {bone_length_loss.val:.5f} ({bone_length_loss.avg:.5f})\t' \
             'Loss {loss.val:.5f} ({loss.avg:.5f})\t' \
             'MPJPE {acc.val:.3f} ({acc.avg:.3f})'.format(
@@ -537,7 +535,6 @@ class EventEgoPoseEstimation(LightningModule):
                 j3d_delta_loss=self.j3d_delta_losses,
                 seg_loss=self.seg_losses,
                 j2d_loss=self.j2d_losses,
-                hms_loss=self.heatmap_losses,
                 bone_length_loss=self.bone_length_losses,
                 acc=self.acc
             )

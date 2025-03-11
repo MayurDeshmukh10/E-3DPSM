@@ -63,6 +63,110 @@ from einops import rearrange
 #         return delta
 
 
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+class UpBlock(nn.Module):
+    """
+    Upsampling block that first upsamples the input,
+    then concatenates the corresponding skip connection,
+    and applies two convolutional layers.
+    """
+    def __init__(self, in_channels, skip_channels, out_channels):
+        super(UpBlock, self).__init__()
+        # Upsample the low-resolution feature map using transposed convolution
+        self.up = nn.ConvTranspose2d(in_channels, out_channels, kernel_size=2, stride=2)
+        # Convolutional block after concatenating with the skip connection
+        self.conv = nn.Sequential(
+            nn.Conv2d(out_channels + skip_channels, out_channels, kernel_size=3, padding=1),
+            nn.BatchNorm2d(out_channels),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1),
+            nn.BatchNorm2d(out_channels),
+            nn.ReLU(inplace=True)
+        )
+        
+    def forward(self, x, skip):
+        x = self.up(x)
+        # Ensure the spatial dimensions match before concatenation
+        x = torch.cat([x, skip], dim=1)
+        x = self.conv(x)
+        return x
+
+class Pose3DDecoder(nn.Module):
+    """
+    A U-Net–style decoder for 3D human pose estimation.
+    
+    Expects:
+      - x: the bottleneck feature (e.g., [batch, 192, 6, 8])
+      - feature_maps: list of skip connection features from the encoder,
+          ordered as [third_encoder, second_encoder, first_encoder], with shapes:
+              [batch, 128, 12, 16],
+              [batch, 64, 24, 32],
+              [batch, 32, 48, 64]
+              
+    Produces:
+      - joints: 3D joint coordinates in shape [batch, num_joints, 3]
+    """
+    def __init__(self, num_joints=16):
+        super(Pose3DDecoder, self).__init__()
+        # Define the upsampling blocks
+        self.up_block3 = UpBlock(in_channels=192, skip_channels=128, out_channels=128)
+        self.up_block2 = UpBlock(in_channels=128, skip_channels=64, out_channels=64)
+        self.up_block1 = UpBlock(in_channels=64, skip_channels=32, out_channels=32)
+        
+        # Instead of global pooling, we flatten the spatial dimensions and use an MLP.
+        # The final feature map is [batch, 32, 48, 64] so the flattened size is:
+        flattened_size = 32 * 48 * 64  # 98304 features
+        
+        # MLP layers to reduce dimensionality to (num_joints * 3)
+        self.mlp = nn.Sequential(
+            nn.Linear(flattened_size, 8192),
+            nn.ReLU(inplace=True),
+            nn.Linear(8192, 1024),
+            nn.ReLU(inplace=True),
+            nn.Linear(1024, 512),
+            nn.ReLU(inplace=True),
+            nn.Linear(512, num_joints * 3)
+        )
+        
+    def forward(self, x, feature_maps):
+        # feature_maps is a list: [skip3, skip2, skip1]
+        x = self.up_block3(x, feature_maps[0])  # [batch, 128, 12, 16]
+        x = self.up_block2(x, feature_maps[1])  # [batch, 64, 24, 32]
+        x = self.up_block1(x, feature_maps[2])  # [batch, 32, 48, 64]
+        
+        # Flatten the spatial dimensions without pooling so spatial details are preserved.
+        x = x.view(x.size(0), -1)
+        joints = self.mlp(x)
+        joints = joints.view(x.size(0), -1, 3)  # reshape to [batch, num_joints, 3]
+        return joints
+
+
+
+class InitialPoseHead(nn.Module):
+    def __init__(self, in_channels, num_joints):
+        super(InitialPoseHead, self).__init__()
+        self.num_joints = num_joints
+        
+
+        self.fc1 = nn.Linear(in_channels, 1024)
+        self.relu1 = nn.ReLU(inplace=True)
+        self.fc2 = nn.Linear(1024, 512)
+        self.relu2 = nn.ReLU(inplace=True)
+        self.fc3 = nn.Linear(512, num_joints)
+
+    def forward(self, x):
+        x = self.fc1(x)
+        x = self.relu1(x)
+        x = self.fc2(x)
+        x = self.relu2(x)
+        x = self.fc3(x)
+        x = x.view(x.size(0), self.num_joints, 3)
+        return x
+
+
 class DeltaHead(nn.Module):
     def __init__(self, in_channels, num_joints, pose_embed_dim=64, hidden_dim=512):
         super(DeltaHead, self).__init__()
@@ -288,12 +392,12 @@ class Event3DPoseNet(nn.Module):
             DecoderConv(2 * 64, 32, 2, sampler='up'),
         ])
 
-        self.initial_pose_decoder = nn.ModuleList([
-            DecoderConv(192, 192, 2),
-            DecoderConv(2 * 192, 128, 2, sampler='up'),
-            DecoderConv(2 * 128, 64, 2, sampler='up'),
-            DecoderConv(2 * 64, 32, 2, sampler='up'),
-        ])
+        # self.initial_pose_decoder = nn.ModuleList([
+        #     DecoderConv(192, 192, 2),
+        #     DecoderConv(2 * 192, 128, 2, sampler='up'),
+        #     DecoderConv(2 * 128, 64, 2, sampler='up'),
+        #     DecoderConv(2 * 64, 32, 2, sampler='up'),
+        # ])
 
         self.delta_decoder = nn.ModuleList([
             DecoderConv(192, 192, 2),
@@ -302,15 +406,19 @@ class Event3DPoseNet(nn.Module):
             DecoderConv(2 * 64, 32, 2, sampler='up'),
         ])
 
-        self.initial_pose_head = Head(2 * 32, self.n_joints, activation='relu')
+        # self.initial_pose_head = Head(2 * 32, self.n_joints, activation='relu')
 
         self.segmentation_head = Head(2 * 32, 1)
 
         self.delta_head = DeltaHead(2 * 32, num_joints=self.n_joints, pose_embed_dim=self.pose_embed_dim)
 
-        self.heatmap_head = Head(2 * 32, self.n_joints, activation='relu')
+        self.intital_pose_decoder = Pose3DDecoder(num_joints=self.n_joints)
 
-        self.joint_regressor_hms = JointRegressor(16, self.n_joints)
+        # self.heatmap_head = Head(2 * 32, self.n_joints, activation='relu')
+
+        # self.joint_regressor_hms = JointRegressor(64, self.n_joints)
+
+        # self.initial_pose_head = InitialPoseHead(9216, self.n_joints)
 
         # self.delta_head = DeltaHead(in_channels=192, num_joints=self.n_joints, pose_embed_dim=self.pose_embed_dim)
 
@@ -380,22 +488,26 @@ class Event3DPoseNet(nn.Module):
         x = last_layer_features
         hms_outs = []
 
-        for index, pose_decoder in enumerate(self.initial_pose_decoder):
-            x = pose_decoder(x)
-            x = torch.cat([x, feature_maps[index]], dim=1)
+        # for index, pose_decoder in enumerate(self.initial_pose_decoder):
+        #     x = pose_decoder(x)
+        #     x = torch.cat([x, feature_maps[index]], dim=1)
 
-            if index >= 1:
-                inter_hms_out = F.interpolate(x[:, :self.n_joints], size=(H // 4, W // 4), mode='bilinear', align_corners=True)
-                hms_outs.append(inter_hms_out)
+            # if index >= 1:
+            #     inter_hms_out = F.interpolate(x[:, :self.n_joints], size=(H // 4, W // 4), mode='bilinear', align_corners=True)
+            #     hms_outs.append(inter_hms_out)
 
-        hms_out = self.heatmap_head(x)
+        # import pdb; pdb.set_trace()
+        # hms_out = self.heatmap_head(x)
     
-        for i in range(len(hms_outs)):
-            hms_out = hms_out + hms_outs[i] 
-        hms_out = hms_out / (len(hms_outs) + 1)
+        # for i in range(len(hms_outs)):
+        #     hms_out = hms_out + hms_outs[i] 
+        # hms_out = hms_out / (len(hms_outs) + 1)
 
         if first_temporal_step:
-            current_pose = self.joint_regressor_hms(hms_out)
+            # current_pose = self.initial_pose_head(x.view(x.shape[0], -1))
+            pose_docoder_feature_maps = [feature_maps[1], feature_maps[2], feature_maps[3]]
+            current_pose = self.intital_pose_decoder(last_layer_features, pose_docoder_feature_maps)
+            # current_pose = self.joint_regressor_hms(hms_out)
         else:
             x = last_layer_features
             for index, delta_decoder in enumerate(self.delta_decoder):
@@ -415,5 +527,5 @@ class Event3DPoseNet(nn.Module):
             'seg_feature': seg_f_detached,
             's5_state': final_state,
             'pose': current_pose,
-            'heatmaps': hms_out
+            # 'heatmaps': hms_out
         }

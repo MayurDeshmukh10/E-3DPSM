@@ -288,20 +288,20 @@ class EgoHPE(nn.Module):
             delta_pose = outs['delta_pose']
             seg_out = outs['seg']
             seg_feature = outs['seg_feature']
-            heatmap = outs['heatmaps']
+            # heatmap = outs['heatmaps']
             if delta_pose is not None:
                 delta_poses.append(delta_pose)
             poses.append(pose)
             # s5_states.append(s5_state)
             seg_outs.append(seg_out)
-            heatmaps.append(heatmap)
+            # heatmaps.append(heatmap)
             voxel_outs.append(out)
 
         abs_poses = torch.stack(poses)
         if len(delta_poses) > 0:
             delta_poses = torch.stack(delta_poses)
         seg_outs = torch.stack(seg_outs)
-        heatmaps = torch.stack(heatmaps)
+        # heatmaps = torch.stack(heatmaps)
         voxel_representations = torch.stack(voxel_outs)
         # s5_states = torch.stack(s5_states)
         
@@ -309,7 +309,7 @@ class EgoHPE(nn.Module):
         outputs['abs_poses'] = abs_poses  
         outputs['seg'] = seg_outs
         outputs['delta_poses'] = delta_poses
-        outputs['heatmaps'] = heatmaps
+        # outputs['heatmaps'] = heatmaps
         outputs['voxel_representations'] = voxel_representations
         # outputs['s5_states'] = s5_states
  
