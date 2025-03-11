@@ -65,11 +65,11 @@ trainer:
   devices: 1
   # num_nodes: 2
   benchmark: false
-  profiler: advanced
+  # profiler: advanced
   # precision: bf16-mixed
   strategy: ddp_find_unused_parameters_true
   # strategy: ddp
-  fast_dev_run: true
+  fast_dev_run: false
   # limit_train_batches: 200
   # limit_val_batches: 100
   # every_n_train_steps: 200

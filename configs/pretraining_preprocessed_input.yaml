@@ -40,7 +40,7 @@ model:
       syn_test_dataset_root_path: /CT/datasets07/nobackup/EE3D-S-Test
       real_dataset_root_path: /CT/datasets07/nobackup/EE3D-R/Real_Dataset
 
-ckpt_path: /CT/EventEgo3Dv2/work/EventEgo3Dv2/results/wandb_data/pretraining_preprocessed_input_3/EventEgo3Dv2/nsq0xhsy/checkpoints/epoch=12.ckpt
+# ckpt_path: /CT/EventEgo3Dv2/work/EventEgo3Dv2/results/wandb_data/pretraining_preprocessed_input_3/EventEgo3Dv2/nsq0xhsy/checkpoints/epoch=12.ckpt
 
 trainer:
   accelerator: gpu
@@ -67,24 +67,24 @@ trainer:
         save_top_k: -1
         filename: "{epoch}"
     - class_path: EventEgoPoseEstimation.modules.pose_estimation.EvaluateCallback
-    - class_path: pytorch_lightning.callbacks.ModelCheckpoint
-      init_args:
-        every_n_train_steps: 10000
-        save_top_k: -1
-        filename: "epoch_{epoch:02d}_step_{step}"
-        # dirpath: "./results/"
-        save_last: True
+    # - class_path: pytorch_lightning.callbacks.ModelCheckpoint
+    #   init_args:
+    #     every_n_train_steps: 10000
+    #     save_top_k: -1
+    #     filename: "epoch_{epoch:02d}_step_{step}"
+    #     # dirpath: "./results/"
+    #     save_last: True
     # - class_path: pytorch_lightning.callbacks.LearningRateFinder
 
   logger:
   - class_path: pytorch_lightning.loggers.WandbLogger
     init_args:
-      name: pretraining_preprocessed_input_4 # Experiment name on wandb
+      name: pretraining_preprocessed_direct_pose_1 # Experiment name on wandb
       project: EventEgo3Dv2  # Replace with your project name on wandb
-      save_dir: ./results/wandb_data/pretraining_preprocessed_input_4  # Local directory to save wandb logs
+      save_dir: ./results/wandb_data/pretraining_preprocessed_direct_pose_1  # Local directory to save wandb logs
       log_model: true  # Log the model checkpoints to wandb
       offline: false  # Set to true if you want to log offline and sync later
   - class_path: pytorch_lightning.loggers.TensorBoardLogger
     init_args:
       save_dir: ./results/
-      name: pretraining_preprocessed_input_4  # TensorBoard experiment name
+      name: pretraining_preprocessed_direct_pose_1  # TensorBoard experiment name
