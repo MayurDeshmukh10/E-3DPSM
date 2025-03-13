@@ -489,7 +489,7 @@ class EventEgoPoseEstimation(LightningModule):
         self.log('train_j3d_loss', self.j3d_losses.avg)
         self.log('train_j3d_delta_loss', self.j3d_delta_losses.avg)
         self.log('train_j2d_loss', self.j2d_losses.avg)
-        self.log('train_heatmap_loss', self.heatmap_losses.avg)
+        # self.log('train_heatmap_loss', self.heatmap_losses.avg)
         self.log('train_bone_length_loss', self.bone_length_losses.avg)
         self.log('train_seg_loss', self.seg_losses.avg)
 

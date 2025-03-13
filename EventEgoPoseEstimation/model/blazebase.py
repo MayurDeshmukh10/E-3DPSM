@@ -17,18 +17,7 @@ class Head(nn.Module):
         self.conv = nn.Conv2d(inp_chns, out_chns, 1, bias=False)
     
     def forward(self, x):
-        return self.activation(self.conv(x))
-
-
-class DepthwiseSeparableConv(nn.Module):
-    def __init__(self, inp_chns, out_chns, kernel_size, stride=1) -> None:
-        super().__init__()
-    
-        self.conv_1 =  nn.Conv2d(inp_chns, inp_chns, kernel_size, stride=stride, groups=inp_chns, padding=kernel_size//2, bias=False)
-        self.conv_2 = nn.Conv2d(inp_chns, out_chns, 1, bias=False)
-
-    def forward(self, x):
-        return self.conv_2(self.conv_1(x))    
+        return self.activation(self.conv(x))   
 
 
 class SqueezeChannels(nn.Module):
@@ -42,7 +31,17 @@ class SqueezeChannels(nn.Module):
 
     def forward(self, x):
         return self.conv(x)
+    
 
+class DepthwiseSeparableConv(nn.Module):
+    def __init__(self, inp_chns, out_chns, kernel_size, stride=1) -> None:
+        super().__init__()
+    
+        self.conv_1 =  nn.Conv2d(inp_chns, inp_chns, kernel_size, stride=stride, groups=inp_chns, padding=kernel_size//2, bias=False)
+        self.conv_2 = nn.Conv2d(inp_chns, out_chns, 1, bias=False)
+
+    def forward(self, x):
+        return self.conv_2(self.conv_1(x)) 
 
 class DecoderConv(nn.Module):
     def __init__(self, inp_chns, out_chns, block_num, sampler=None) -> None:
