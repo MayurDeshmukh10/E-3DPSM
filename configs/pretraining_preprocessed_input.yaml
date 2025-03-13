@@ -11,10 +11,10 @@ model:
       image_size: [256, 192]
       batch_size: 9 #16 # 9 # individual batch size
 
-    lr: 0.001
+    lr: 0.00001
     lr_decay_epochs:
       - 52 #10
-      - 57 #15
+      - 57 #15 # decay at 20, 22(check this)
     
     loss_weights:
       bone_length: 0.001
@@ -40,7 +40,7 @@ model:
       syn_test_dataset_root_path: /CT/datasets07/nobackup/EE3D-S-Test
       real_dataset_root_path: /CT/datasets07/nobackup/EE3D-R/Real_Dataset
 
-ckpt_path: /CT/EventEgo3Dv2/work/EventEgo3Dv2/results/wandb_data/pretraining_preprocessed_input_3/EventEgo3Dv2/nsq0xhsy/checkpoints/epoch=12.ckpt
+ckpt_path: /CT/EventEgo3Dv2/work/EventEgo3Dv2/results/wandb_data/pretraining_preprocessed_input_7/EventEgo3Dv2/u9q051mw/checkpoints/epoch=26.ckpt
 
 trainer:
   accelerator: gpu
@@ -79,12 +79,12 @@ trainer:
   logger:
   - class_path: pytorch_lightning.loggers.WandbLogger
     init_args:
-      name: pretraining_preprocessed_input_4 # Experiment name on wandb
+      name: pretraining_preprocessed_input_8 # Experiment name on wandb
       project: EventEgo3Dv2  # Replace with your project name on wandb
-      save_dir: ./results/wandb_data/pretraining_preprocessed_input_4  # Local directory to save wandb logs
+      save_dir: ./results/wandb_data/pretraining_preprocessed_input_8  # Local directory to save wandb logs
       log_model: true  # Log the model checkpoints to wandb
       offline: false  # Set to true if you want to log offline and sync later
   - class_path: pytorch_lightning.loggers.TensorBoardLogger
     init_args:
       save_dir: ./results/
-      name: pretraining_preprocessed_input_4  # TensorBoard experiment name
+      name: pretraining_preprocessed_input_8  # TensorBoard experiment name

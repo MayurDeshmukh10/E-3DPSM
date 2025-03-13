@@ -276,8 +276,8 @@ class EventEgoPoseEstimation(LightningModule):
         self.val_dataloader_len = len(dataloader)
         return dataloader
 
-    # def on_load_checkpoint(self, checkpoint: dict):
-    #     checkpoint['optimizer_states'][0]['param_groups'][0]['lr'] =  self.lr
+    def on_load_checkpoint(self, checkpoint: dict):
+        checkpoint['optimizer_states'][0]['param_groups'][0]['lr'] =  self.lr
 
     def training_step(self, batch, batch_idx):
         end = time.time()
