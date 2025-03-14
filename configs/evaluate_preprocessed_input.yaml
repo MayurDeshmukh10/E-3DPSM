@@ -28,8 +28,8 @@ model:
     dataset_type:  synthetic # real
     training_type: pretrain #finetune #pretrain # finetune
     use_bg_augmentation: false
-    temporal_steps: 20
-    sample_step: 10 # not used currently
+    temporal_steps: 10
+    sample_step: 0 # not used currently
     batch_size: 9
     workers: 14
 
@@ -41,7 +41,7 @@ model:
       real_dataset_root_path: /CT/datasets07/nobackup/EE3D-R/Real_Dataset
 
 
-ckpt_path: /CT/EventEgo3Dv2/work/EventEgo3Dv2/results/wandb_data/pretraining_preprocessed_input/EventEgo3Dv2/241v5ky5/checkpoints/epoch=11.ckpt
+ckpt_path: /CT/EventEgo3Dv2/work/EventEgo3Dv2/results/wandb_data/pretraining_preprocessed_input_9/EventEgo3Dv2/bmu1ghsv/checkpoints/epoch=34.ckpt
 
 trainer:
   accelerator: gpu
@@ -89,4 +89,4 @@ trainer:
   - class_path: pytorch_lightning.loggers.TensorBoardLogger
     init_args:
       save_dir: ./results/
-      name: evaluate_preprocessed_epoch_11_ts_20  # TensorBoard experiment name
+      name: test  # TensorBoard experiment name
