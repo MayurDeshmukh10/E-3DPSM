@@ -40,7 +40,7 @@ model:
       syn_test_dataset_root_path: /CT/datasets07/nobackup/EE3D-S-Test
       real_dataset_root_path: /CT/datasets07/nobackup/EE3D-R/Real_Dataset
 
-ckpt_path: /CT/EventEgo3Dv2/work/EventEgo3Dv2/results/wandb_data/pretraining_preprocessed_dp_attention_1/EventEgo3Dv2/xtcvjz0r/checkpoints/epoch=3.ckpt
+ckpt_path: /CT/EventEgo3Dv2/work/EventEgo3Dv2/results/wandb_data/pretraining_preprocessed_dp_attention_2/EventEgo3Dv2/1da8xgbe/checkpoints/epoch=7.ckpt
 
 trainer:
   accelerator: gpu
@@ -79,12 +79,12 @@ trainer:
   logger:
   - class_path: pytorch_lightning.loggers.WandbLogger
     init_args:
-      name: pretraining_preprocessed_dp_attention_2 # Experiment name on wandb
+      name: pretraining_preprocessed_dp_attention_3 # Experiment name on wandb
       project: EventEgo3Dv2  # Replace with your project name on wandb
-      save_dir: ./results/wandb_data/pretraining_preprocessed_dp_attention_2  # Local directory to save wandb logs
+      save_dir: ./results/wandb_data/pretraining_preprocessed_dp_attention_3  # Local directory to save wandb logs
       log_model: true  # Log the model checkpoints to wandb
       offline: false  # Set to true if you want to log offline and sync later
   - class_path: pytorch_lightning.loggers.TensorBoardLogger
     init_args:
       save_dir: ./results/
-      name: pretraining_preprocessed_dp_attention_2  # TensorBoard experiment name
+      name: pretraining_preprocessed_dp_attention_3  # TensorBoard experiment name
