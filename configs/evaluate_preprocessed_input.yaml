@@ -41,7 +41,7 @@ model:
       real_dataset_root_path: /CT/datasets07/nobackup/EE3D-R/Real_Dataset
 
 
-ckpt_path: /CT/EventEgo3Dv2/work/EventEgo3Dv2/results/wandb_data/pretraining_preprocessed_input_9/EventEgo3Dv2/bmu1ghsv/checkpoints/epoch=34.ckpt
+ckpt_path: /CT/EventEgo3Dv2/work/EventEgo3Dv2/results/wandb_data/pretraining_preprocessed_input_9/EventEgo3Dv2/bmu1ghsv/checkpoints/epoch=39.ckpt
 
 trainer:
   accelerator: gpu
