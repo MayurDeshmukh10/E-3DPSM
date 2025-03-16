@@ -70,7 +70,7 @@ trainer:
   # precision: bf16-mixed
   strategy: ddp_find_unused_parameters_true
   # strategy: ddp
-  fast_dev_run: false
+  fast_dev_run: true
   # limit_train_batches: 200
   # limit_val_batches: 100
   # every_n_train_steps: 200
