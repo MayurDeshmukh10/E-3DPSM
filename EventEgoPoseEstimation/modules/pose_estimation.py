@@ -227,7 +227,7 @@ class EventEgoPoseEstimation(LightningModule):
                 assert False, f"Invalid training type: {self.training_type}"
  
 
-            test_dataset = EgoEvent(cfg, test_preprocessed_input, test_dataset, temporal_bins=self.temporal_bins, split='test')
+            test_dataset = EgoEvent(cfg, test_preprocessed_input, test_dataset, temporal_bins=self.temporal_bins, split='test', finetune=True)
             self.test_dataset = TemoralWrapper(test_dataset, self.temporal_steps, split='test', sample_step=self.sample_step)
 
             # cfg.DATASET.TYPE = 'Synthetic'
@@ -424,7 +424,7 @@ class EventEgoPoseEstimation(LightningModule):
             
             avg_acc, cnt = accuracy(gt_abs_poses, pred_abs_poses, valid_j3d)
             # print("Input shape : ", inp.shape)
-            # avg_acc, cnt = accuracy_with_vis(gt_abs_poses, pred_abs_poses, valid_j3d, batch_idx, outputs['abs_poses'].detach(), gt_abs_poses_og.detach(), outputs['voxel_representations'], pose_filename, frame_index.view(20, 6))
+            # avg_acc, cnt = accuracy_with_vis(gt_abs_poses, pred_abs_poses, valid_j3d, batch_idx, outputs['abs_poses'].detach(), gt_abs_poses_og.detach(), outputs['voxel_representations'], pose_filename, frame_index)
 
             # for i in range(gt_abs_poses_og.size(0)):
             #     dump_sketelon_image(gt_abs_poses_og[i][0].detach(), outputs['abs_poses'][i][0].detach(), f"./visualizations/new_dataloader/{batch_idx}_bin-{i}_mpjpe_{avg_acc.item()}.png")
