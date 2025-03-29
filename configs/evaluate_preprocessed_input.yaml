@@ -41,7 +41,7 @@ model:
       real_dataset_root_path: /CT/datasets07/nobackup/EE3D-R/Real_Dataset
 
 
-ckpt_path: /CT/EventEgo3Dv2/work/EventEgo3Dv2/results/wandb_data/pretraining_preprocessed_dp_attention_2/EventEgo3Dv2/1da8xgbe/checkpoints/epoch=4.ckpt
+ckpt_path: /CT/EventEgo3Dv2/work/EventEgo3Dv2/results/wandb_data/pretraining_preprocessed_dp_attention_6/EventEgo3Dv2/e7syun8j/checkpoints/epoch=30.ckpt
 
 trainer:
   accelerator: gpu
@@ -89,4 +89,4 @@ trainer:
   - class_path: pytorch_lightning.loggers.TensorBoardLogger
     init_args:
       save_dir: ./results/
-      name: test  # TensorBoard experiment name
+      name: eval_attention_t_20_with_abs_reprediction_at_5_epoch_30  # TensorBoard experiment name
