@@ -8,6 +8,8 @@ import pyrender
 import trimesh
 import os
 
+import matplotlib.pyplot as plt
+
 from PIL import Image
 from configs.settings import config
 from EventEgoPoseEstimation.utils.heatmap import get_max_preds
@@ -669,3 +671,25 @@ def main():
     w.add_child(widget3d)
 
     app.run()
+
+
+def drift_plot(delta_mpjpe_errors, abs_mpjpe_errors, old_pose_errors):
+    delta_mpjpe_errors = delta_mpjpe_errors.cpu().numpy()
+    abs_mpjpe_errors = abs_mpjpe_errors.cpu().numpy()
+    # re_poses = re_poses.cpu().numpy()
+    old_pose_errors = old_pose_errors.cpu().numpy()
+
+
+    # time_steps = mpjpe_errors.shape[0]
+    time_steps = np.arange(delta_mpjpe_errors.shape[0])
+    plt.figure(figsize=(8, 4))
+    plt.plot(time_steps, delta_mpjpe_errors, marker='o', linestyle='-', color='r')
+    plt.plot(time_steps, abs_mpjpe_errors, marker='o', linestyle='-', color='b')
+    # plt.plot(time_steps, re_poses, marker='o', linestyle='-', color='g')
+    plt.plot(time_steps, old_pose_errors, marker='o', linestyle='-', color='g')
+    plt.xlabel('Time Step')
+    plt.ylabel('Mean Per Joint Position Error (mm)')
+    plt.title('Drift Over Time in 3D Pose Estimation')
+    plt.grid(True)
+    plt.savefig("/CT/EventEgo3Dv2/work/EventEgo3Dv2/drift_error.png")
+

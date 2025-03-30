@@ -7,6 +7,8 @@ import numpy as np
 from EventEgoPoseEstimation.utils.vis import visualize_temporal_bins
 from EventEgoPoseEstimation.dataset.dataset_utils import event_augmentation, save_augmented_data, event_augmentation_v2
 
+from filterpy.kalman import KalmanFilter
+from filterpy.common import Q_discrete_white_noise
 
 # class ValueLayer(nn.Module):
 #     def __init__(self, mlp_layers, activation=nn.ReLU(), num_channels=9):
@@ -227,7 +229,10 @@ class EgoHPE(nn.Module):
     def forward(self, x, augmentation_data, device='cuda'):
 
         s5_state = None
+        re_s5_state = None
         pose = None
+        old_pose = None
+        re_pose = None
 
         T, B, C, H, W = x.shape
       
@@ -238,6 +243,33 @@ class EgoHPE(nn.Module):
         s5_states = []
         voxel_outs = []
         event_voxels = []
+        all_abs_poses = []
+        re_poses = []
+        poses_old = []
+
+        state_vector_dim = 16 * 3
+        measurement_vector_dim = 16 * 3 
+        dim = 16 * 3
+        dt = 1/1000.0
+
+
+        kf = KalmanFilter(dim_x=state_vector_dim, dim_z=measurement_vector_dim)
+
+        kf.F = np.eye(dim) # State transition matrix: identity since state update is additive
+        kf.B = np.eye(dim) # Control transition matrix: identity to map the delta (u) directly to state
+        kf.H = np.eye(dim) # Measurement function: identity since we directly measure joint positions
+        
+        
+        # kf.Q = np.eye(dim) * process_var # Process noise covariance matrix: uncertainty in the prediction (delta)
+        measurement_var = 1e-2
+        kf.R = np.eye(dim) * measurement_var # Measure
+
+        # kf.R *= 5
+        # kf.Q = Q_discrete_white_noise(1, dt, .1, block_size=dim)
+        process_var = 1e-3  # or another value tuned to your system
+        kf.Q = np.eye(48) * process_var
+
+
 
         # for i in range(T):
 
@@ -277,17 +309,37 @@ class EgoHPE(nn.Module):
             #     save_augmented_data(o.detach(), f'/CT/EventEgo3Dv2/work/EventEgo3Dv2/visualizations/opt_augmented/sum_{ii}.png')
             #     save_augmented_data(out_copy[ii].detach(), f'/CT/EventEgo3Dv2/work/EventEgo3Dv2/visualizations/opt_augmented/sum_og_{ii}.png')
 
-            outs = self.event_3d_posenet(out, s5_state, pose, first_temporal_step=(i == 0))
+            if i in [0, 5]:
+                first_step = True
+            else:
+                first_step = False
+
+            outs, kf = self.event_3d_posenet(out, s5_state, pose, old_pose, kf, first_temporal_step=(i == 0))
+            # outs = self.event_3d_posenet(out, s5_state, pose, first_temporal_step=True)
+
+            # re_outs, kf = self.event_3d_posenet(out, re_s5_state, re_pose, kf, first_temporal_step=first_step)
+
+            # re_s5_state = re_outs['s5_state'].detach()
+            # re_pose = re_outs['pose'] 
+
+            # re_poses.append(re_pose)
+
 
             # outs = self.event_3d_posenet(event_voxels[i], s5_state, pose, first_temporal_step=(i == 0))
 
             # import pdb; pdb.set_trace()
+
+            old_pose = outs['current_pose_old']
 
             s5_state = outs['s5_state'].detach()
             pose = outs['pose']
             delta_pose = outs['delta_pose']
             seg_out = outs['seg']
             seg_feature = outs['seg_feature']
+            abs_pose = outs['abs_pose']
+
+            poses_old.append(old_pose)
+            all_abs_poses.append(abs_pose)
             # heatmap = outs['heatmaps']
             if delta_pose is not None:
                 delta_poses.append(delta_pose)
@@ -303,7 +355,12 @@ class EgoHPE(nn.Module):
         seg_outs = torch.stack(seg_outs)
         # heatmaps = torch.stack(heatmaps)
         voxel_representations = torch.stack(voxel_outs)
+
+        all_abs_poses = torch.stack(all_abs_poses)
+        poses_old = torch.stack(poses_old)
         # s5_states = torch.stack(s5_states)
+
+        # re_poses = torch.stack(re_poses)
         
         outputs = {}
         outputs['abs_poses'] = abs_poses  
@@ -311,6 +368,10 @@ class EgoHPE(nn.Module):
         outputs['delta_poses'] = delta_poses
         # outputs['heatmaps'] = heatmaps
         outputs['voxel_representations'] = voxel_representations
+
+        outputs['all_abs_poses'] = all_abs_poses
+        outputs['poses_old'] = poses_old
+        # outputs['re_poses'] = re_poses
         # outputs['s5_states'] = s5_states
  
         return outputs

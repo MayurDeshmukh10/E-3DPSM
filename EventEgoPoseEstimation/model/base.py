@@ -12,6 +12,32 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+import numpy as np
+from filterpy.kalman import KalmanFilter
+
+def apply_kf_to_sequence(abs_poses, delta_poses, dt=1/1000., Q_scale=3.0, R_scale=1.0):
+    state_vector_dim = 16 * 3
+    measurement_vector_dim = 16 * 3 
+    dim = 16 * 3
+
+    kf = KalmanFilter(dim_x=state_vector_dim, dim_z=measurement_vector_dim)
+
+    kf.x = abs_poses[0].reshape(-1)
+    
+    # kf.P = np.eye(dim) * 1.0 # State covariance matrix: initial uncertainty in the state
+    kf.F = np.eye(dim) # State transition matrix: identity since state update is additive
+    kf.B = np.eye(dim) # Control transition matrix: identity to map the delta (u) directly to state
+    kf.H = np.eye(dim) # Measurement function: identity since we directly measure joint positions
+    
+    
+    kf.Q = np.eye(dim) * process_var # Process noise covariance matrix: uncertainty in the prediction (delta)
+    kf.R = np.eye(dim) * measurement_var # Measurement noise covariance matrix: uncertainty in the absolute pose measurement
+
+    u = delta_change.reshape(-1, 1)
+    z = abs_pose_measurement.reshape(-1, 1)
+
+    kf.predict(u=u)
+
 
 class JointRegressor(nn.Module):
     def __init__(self, in_channels, num_joints):
@@ -111,7 +137,7 @@ class Event3DPoseNet(nn.Module):
         self.delta_head = JointRegressor(9216 + self.pose_embed_dim, num_joints=self.n_joints)
 
 
-    def forward(self, x, states, previous_pose, first_temporal_step=False):
+    def forward(self, x, states, previous_pose, previous_pose_old, kalman_filter, first_temporal_step=False):
         
         H, W = x.shape[-2:]
         B = x.shape[0]
@@ -176,11 +202,21 @@ class Event3DPoseNet(nn.Module):
 
         if first_temporal_step:
             current_pose = self.initial_pose_head(x)
+            kalman_filter.x = current_pose.reshape(-1, 1).cpu()
+            abs_pose = current_pose
+            current_pose_old = current_pose
         else:
+            abs_pose = self.initial_pose_head(x)
             previous_pose_emb = self.pose_embedding(previous_pose)
             x = torch.cat([x, previous_pose_emb], dim=1) # [batch_size, 9216 + 64]
             delta_pose = self.delta_head(x)
-            current_pose = previous_pose + delta_pose
+            # import pdb; pdb.set_trace()
+
+            kalman_filter.predict(u=delta_pose.reshape(-1, 1).cpu())
+            kalman_filter.update(abs_pose.reshape(-1, 1).cpu())
+            # import pdb; pdb.set_trace()
+            current_pose = torch.from_numpy(kalman_filter.x.reshape(16, 3)).unsqueeze(0).cuda().float()
+            current_pose_old = previous_pose_old + delta_pose
 
         final_state = states
 
@@ -190,5 +226,7 @@ class Event3DPoseNet(nn.Module):
             'seg_feature': seg_f_detached,
             's5_state': final_state,
             'pose': current_pose,
+            'abs_pose': abs_pose,
+            'current_pose_old': current_pose_old
             # 'heatmaps': hms_out
-        }
+        }, kalman_filter

@@ -54,6 +54,34 @@ def accuracy(gt3ds, preds, valid_j3d):
     
     return joint_error, cnt
 
+
+def accuracy_test(gt3ds, preds, valid_j3d):
+    if isinstance(gt3ds, torch.Tensor):
+        gt3ds = gt3ds.detach()
+    if isinstance(preds, torch.Tensor):
+        preds = preds.detach()
+        
+    if isinstance(valid_j3d, torch.Tensor):
+        valid_j3d = valid_j3d.detach()
+
+    gt3ds1 = gt3ds * valid_j3d
+    preds1 = preds * valid_j3d
+
+    # cnt = np.sum(valid_j3d)
+    # cnt = torch.sum(valid_j3d)
+    # if cnt == 0:
+    #     return 0, 0
+    
+    # joint_error = np.sqrt(np.sum((gt3ds1 - preds1)**2, axis=-1))
+
+    joint_error = torch.sqrt(torch.sum((gt3ds1 - preds1) ** 2, dim=-1))
+
+    # joint_error = np.sum(joint_error) / cnt
+    # joint_error = torch.sum(joint_error) / cnt
+    joint_error = torch.mean(joint_error, axis=1)
+    
+    return joint_error, 10
+
 import cv2
 import numpy as np
 

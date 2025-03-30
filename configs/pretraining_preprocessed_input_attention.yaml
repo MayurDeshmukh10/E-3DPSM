@@ -40,11 +40,19 @@ model:
       syn_test_dataset_root_path: /CT/datasets07/nobackup/EE3D-S-Test
       real_dataset_root_path: /CT/datasets07/nobackup/EE3D-R/Real_Dataset
 
+<<<<<<< Updated upstream
 ckpt_path: /CT/EventEgo3Dv2/work/EventEgo3Dv2/results/wandb_data/pretraining_preprocessed_dp_attention_7/EventEgo3Dv2/oom8c1go/checkpoints/epoch=41.ckpt
 
 trainer:
   accelerator: gpu
   max_epochs: 80
+=======
+ckpt_path: /CT/EventEgo3Dv2/work/EventEgo3Dv2/results/wandb_data/pretraining_preprocessed_dp_attention_6/EventEgo3Dv2/e7syun8j/checkpoints/epoch=31.ckpt
+
+trainer:
+  accelerator: gpu
+  max_epochs: 50
+>>>>>>> Stashed changes
   check_val_every_n_epoch: 1
   devices: 2
   num_nodes: 2
@@ -79,12 +87,22 @@ trainer:
   logger:
   - class_path: pytorch_lightning.loggers.WandbLogger
     init_args:
+<<<<<<< Updated upstream
       name: pretraining_preprocessed_dp_attention_8 # Experiment name on wandb
       project: EventEgo3Dv2  # Replace with your project name on wandb
       save_dir: ./results/wandb_data/pretraining_preprocessed_dp_attention_8  # Local directory to save wandb logs
+=======
+      name: pretraining_preprocessed_dp_attention_7 # Experiment name on wandb
+      project: EventEgo3Dv2  # Replace with your project name on wandb
+      save_dir: ./results/wandb_data/pretraining_preprocessed_dp_attention_7  # Local directory to save wandb logs
+>>>>>>> Stashed changes
       log_model: true  # Log the model checkpoints to wandb
       offline: false  # Set to true if you want to log offline and sync later
   - class_path: pytorch_lightning.loggers.TensorBoardLogger
     init_args:
       save_dir: ./results/
+<<<<<<< Updated upstream
       name: pretraining_preprocessed_dp_attention_8  # TensorBoard experiment name
+=======
+      name: pretraining_preprocessed_dp_attention_7  # TensorBoard experiment name
+>>>>>>> Stashed changes

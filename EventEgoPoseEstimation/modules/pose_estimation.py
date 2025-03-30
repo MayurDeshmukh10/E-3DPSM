@@ -25,6 +25,8 @@ import cv2
 
 from pathlib import Path
 
+import matplotlib.pyplot as plt
+
 
 from EventEgoPoseEstimation.model import EgoHPE
 
@@ -40,11 +42,13 @@ from configs.settings import config as cfg
 
 from EventEgoPoseEstimation.core.function import compute_fn, _print_name_value, compute_fn_v2, compute_fn_v3
 
-from EventEgoPoseEstimation.core.evaluate import accuracy, accuracy_with_vis
+from EventEgoPoseEstimation.core.evaluate import accuracy, accuracy_with_vis, accuracy_test
+
+from EventEgoPoseEstimation.core.kalman_filter import apply_kalman_filtering
 
 from EventEgoPoseEstimation.core.loss import SegmentationLoss, BoneLengthLoss, JointMSELoss, HeatMapJointsMSELoss, BoneOrientationLoss
 
-from EventEgoPoseEstimation.utils.vis import save_pose_images, save_debug_images, save_debug_3d_joints, save_debug_segmenation, save_debug_eros, generate_skeleton_image, dump_sketelon_image
+from EventEgoPoseEstimation.utils.vis import save_pose_images, save_debug_images, save_debug_3d_joints, save_debug_segmenation, save_debug_eros, generate_skeleton_image, dump_sketelon_image, drift_plot
 
 from EventEgoPoseEstimation.core.inference import get_j2d_from_hms
 
@@ -60,6 +64,90 @@ torch.set_float32_matmul_precision('medium')
 import itertools
 import os
 import psutil
+
+from filterpy.kalman import KalmanFilter
+from filterpy.common import Q_discrete_white_noise
+
+
+# def apply_kf_to_sequence(abs_seq, dt=1/1000., Q_scale=3.0, R_scale=1.0):
+#     """
+#     Apply a Kalman filter to a single sequence of absolute poses.
+    
+#     Parameters:
+#       abs_seq: numpy array of shape [T, J, 3] (absolute poses over T timesteps)
+#       dt: time step (s)
+#       Q_scale: process noise variance scale
+#       R_scale: measurement noise variance scale
+      
+#     Returns:
+#       filtered_seq: numpy array of shape [T, J, 3] with filtered poses.
+#     """
+#     T, J, _ = abs_seq.shape
+#     d = J * 3  # measurement dimension
+#     # Initialize Kalman filter with state dimension 2*d (position and velocity) and measurement dimension d.
+#     kf = KalmanFilter(dim_x=2*d, dim_z=d)
+    
+#     # Initial state: positions from the first measurement and zero velocities.
+#     kf.x = np.hstack([abs_seq[0].reshape(-1), np.zeros(d)])
+    
+#     # Construct state transition matrix F.
+#     F = np.zeros((2*d, 2*d))
+#     # For each measurement component, update: pos[t] = pos[t-1] + dt * vel[t-1]
+#     for i in range(d):
+#         F[i, i] = 1.0
+#         F[i, i+d] = dt
+#     for i in range(d):
+#         F[i+d, i+d] = 1.0
+#     kf.F = F
+
+#     # Measurement matrix H: we observe only the position components.
+#     H = np.zeros((d, 2*d))
+#     for i in range(d):
+#         H[i, i] = 1.0
+#     kf.H = H
+
+#     # Set measurement noise covariance.
+#     kf.R *= R_scale
+#     # Set process noise covariance using a white-noise acceleration model.
+#     kf.Q = Q_discrete_white_noise(dim=2, dt=dt, var=Q_scale, block_size=d)
+
+#     # Allocate space for filtered sequence.
+#     filtered_seq = np.zeros((T, d))
+#     filtered_seq[0] = abs_seq[0].reshape(-1)
+    
+#     # Run filter for each timestep.
+#     for t in range(1, T):
+#         kf.predict()
+#         # Update with the current measurement (flattened absolute pose)
+#         kf.update(abs_seq[t].reshape(-1))
+#         filtered_seq[t] = kf.x[:d]  # take only the position part of the state
+        
+#     # Reshape filtered output back to [T, J, 3]
+#     filtered_seq = filtered_seq.reshape(T, J, 3)
+#     return filtered_seq
+
+
+
+# def apply_kf_to_sequence(abs_seq, dt=1/1000., Q_scale=3.0, R_scale=1.0):
+#     state_vector_dim = 16 * 3
+#     measurement_vector_dim = 16 * 3 
+
+#     kf = KalmanFilter(dim_x=state_vector_dim, dim_z=measurement_vector_dim)
+
+#     kf.x = abs_poses[0].reshape(-1)
+    
+#     # kf.P = np.eye(dim) * 1.0 # State covariance matrix: initial uncertainty in the state
+#     kf.F = np.eye(dim) # State transition matrix: identity since state update is additive
+#     kf.B = np.eye(dim) # Control transition matrix: identity to map the delta (u) directly to state
+#     kf.H = np.eye(dim) # Measurement function: identity since we directly measure joint positions
+    
+    
+#     kf.Q = np.eye(dim) * process_var # Process noise covariance matrix: uncertainty in the prediction (delta)
+    # kf.R = np.eye(dim) * measurement_var # Measurement noise covariance matrix: uncertainty in the absolute pose measurement
+
+
+
+
 
 class EventEgoPoseEstimation(LightningModule):
 
@@ -386,11 +474,11 @@ class EventEgoPoseEstimation(LightningModule):
 
 
         if vis == False:
-            try:
-                inps, outputs, gt_hms, gt_abs_poses_og, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index, pose_filename = compute_fn_v3(self.model, batch)
-            except RuntimeError as e:
-                logger.info("Error in batch : {}".format(e))
-                return
+            # try:
+            inps, outputs, gt_hms, gt_abs_poses_og, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index, pose_filename = compute_fn_v3(self.model, batch)
+            # except RuntimeError as e:
+                # logger.info("Error in batch : {}".format(e))
+                # return
 
             
             meta = {'j3d': gt_abs_poses_og, 'j2d': gt_j2d, 'vis_j2d': vis_j2d, 'vis_j3d': vis_j3d}
@@ -398,11 +486,61 @@ class EventEgoPoseEstimation(LightningModule):
             pred_abs_poses_t = outputs['abs_poses'] * 1000 # scale to mm 
             gt_j3d_t = gt_abs_poses_og * 1000 # scale to mm
 
-            # pred_abs_poses = pred_abs_poses[-1, :, :, :] # use abs poses of last temporal step
-            # gt_abs_poses = gt_abs_poses[-1, :, :, :]
+            pred_delta_poses = outputs['delta_poses'] * 1000 
+
+            # # Apply Kalman filtering to reduce drift
+            # confidence_estimator = None  # Use default confidence values
+            # # Alternatively, create a more sophisticated confidence estimator
+            # # confidence_estimator = lambda abs_pose, delta: (0.7, 0.3)  # Example fixed confidence
+
+            # filtered_poses = apply_kalman_filtering(
+            #     pred_abs_poses_t, 
+            #     pred_delta_poses, 
+            #     confidence_estimator
+            # )
+
+            # ----- Apply Kalman filtering to correct drift -----
+            # We apply the filter per sequence (per batch element). Adjust dt if needed.
+            # dt = 1/1000.  # Change this if your sequence has a different time step.
+            # # Q_scale = 3.0
+            # # R_scale = 1.0
+
+            # Q_scale = 5.0
+            # R_scale = 0.1
+
+            # T, B, J, _ = pred_abs_poses_t.shape
+            # fused_abs_poses = torch.zeros_like(pred_abs_poses_t)
+            # # Loop over batch elements and apply the filter on each sequence
+            # for b in range(B):
+            #     # Convert the T x J x 3 tensor to numpy array.
+            #     abs_seq = pred_abs_poses_t[:, b, :, :].detach().cpu().numpy()
+            #     # Apply Kalman filter to the sequence.
+            #     filtered_seq = apply_kf_to_sequence(abs_seq, dt=dt, Q_scale=Q_scale, R_scale=R_scale)
+            #     # Convert back to tensor and store.
+            #     fused_abs_poses[:, b, :, :] = torch.from_numpy(filtered_seq).to(pred_abs_poses_t.device)
+
+            # Q_scale = 100.0
+            # R_scale = 10.0
+
+            # T, B, J, _ = pred_abs_poses_t.shape
+            # fused_abs_poses1 = torch.zeros_like(pred_abs_poses_t)
+            # # Loop over batch elements and apply the filter on each sequence
+            # for b in range(B):
+            #     # Convert the T x J x 3 tensor to numpy array.
+            #     abs_seq = pred_abs_poses_t[:, b, :, :].detach().cpu().numpy()
+            #     # Apply Kalman filter to the sequence.
+            #     filtered_seq = apply_kf_to_sequence(abs_seq, dt=dt, Q_scale=Q_scale, R_scale=R_scale)
+            #     # Convert back to tensor and store.
+            #     fused_abs_poses1[:, b, :, :] = torch.from_numpy(filtered_seq).to(pred_abs_poses_t.device)
+
+            # # pred_abs_poses = pred_abs_poses[-1, :, :, :] # use abs poses of last temporal step
+            # # gt_abs_poses = gt_abs_poses[-1, :, :, :]
 
             pred_abs_poses = pred_abs_poses_t[-1, :, :, :] # use abs poses of last temporal step
+            # pred_abs_poses = fused_abs_poses[-1, :, :, :] # use abs poses of last temporal step
+
             gt_abs_poses = gt_j3d_t[-1, :, :, :]
+            valid_j3d_t = valid_j3d
 
 
             valid_j3d = valid_j3d[-1, :, :, :]
@@ -420,6 +558,25 @@ class EventEgoPoseEstimation(LightningModule):
             # print(f"Current process memory usage: {memory_usage_mb:.2f} MB")
             
             avg_acc, cnt = accuracy(gt_abs_poses, pred_abs_poses, valid_j3d)
+
+            # all_pred_abs = outputs['all_abs_poses'] * 1000
+            # poses_old = outputs['poses_old'] * 1000
+            # # re_poses = outputs['re_poses'] * 1000
+            # abs_avg_acc_all_steps, cnt_0 = accuracy_test(gt_j3d_t[:, 0, ...], all_pred_abs[:, 0, ...], valid_j3d_t[:, 0, ...])
+            # delta_avg_acc_all_steps, cnt_0 = accuracy_test(gt_j3d_t[:, 0, ...], pred_abs_poses_t[:, 0, ...], valid_j3d_t[:, 0, ...])
+            # # reposes_avg_acc_all_steps, cnt_0 = accuracy_test(gt_j3d_t[:, 0, ...], re_poses[:, 0, ...], valid_j3d_t[:, 0, ...])
+
+            # pose_old_avg_acc_all_steps, cnt_0 = accuracy_test(gt_j3d_t[:, 0, ...], poses_old[:, 0, ...], valid_j3d_t[:, 0, ...])
+
+
+            # filtered_avg_acc_all_steps, cnt_0 = accuracy_test(gt_j3d_t[:, 0, ...], fused_abs_poses[:, 0, ...], valid_j3d_t[:, 0, ...])
+            # filtered_avg_acc_all_steps_q10, cnt_0 = accuracy_test(gt_j3d_t[:, 0, ...], fused_abs_poses1[:, 0, ...], valid_j3d_t[:, 0, ...])
+
+            # drift_plot(delta_avg_acc_all_steps, abs_avg_acc_all_steps, pose_old_avg_acc_all_steps)
+
+            # import pdb; pdb.set_trace()
+
+
             # print("Input shape : ", inp.shape)
             # avg_acc, cnt = accuracy_with_vis(gt_abs_poses, pred_abs_poses, valid_j3d, batch_idx, outputs['abs_poses'].detach(), gt_abs_poses_og.detach(), outputs['voxel_representations'], pose_filename, frame_index.view(20, 6))
 

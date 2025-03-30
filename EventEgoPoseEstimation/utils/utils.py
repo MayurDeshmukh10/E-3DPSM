@@ -53,9 +53,9 @@ def create_logger(cfg, cfg_name, phase='train'):
     #         logger.removeHandler(handler)
 
     # if not logger.hasHandlers():
-    #     file_handler = logging.FileHandler(str(final_log_file))
-    #     file_handler.setFormatter(logging.Formatter('%(asctime)-15s %(message)s'))
-    #     logger.addHandler(file_handler)  # Add only FileHandler, no StreamHandler
+    file_handler = logging.FileHandler(str(final_log_file))
+    file_handler.setFormatter(logging.Formatter('%(asctime)-15s %(message)s'))
+    logger.addHandler(file_handler)  # Add only FileHandler, no StreamHandler
 
     console = logging.StreamHandler()
     logging.getLogger('').addHandler(console)
