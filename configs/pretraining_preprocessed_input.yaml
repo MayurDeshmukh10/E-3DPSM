@@ -11,10 +11,10 @@ model:
       image_size: [256, 192]
       batch_size: 9 #16 # 9 # individual batch size
 
-    lr: 0.001
+    lr: 0.00001
     lr_decay_epochs:
       - 52 #10
-      - 57 #15
+      - 57 #15 # decay at 20, 22(check this)
     
     loss_weights:
       bone_length: 0.001

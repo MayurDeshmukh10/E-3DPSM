@@ -33,6 +33,8 @@ class SyntheticEventStream(Dataset):
         with open(self.processed_input_path / 'meta.json', 'r') as f:
             meta = json.load(f)
             
+        self.height = 480
+        self.width = 640
         
         self.total_frames = meta['total_frames']
         
@@ -71,7 +73,14 @@ class SyntheticEventStream(Dataset):
         segmentation_path = self.data_path / str(int(index)) / 'Segmentation' / 'Image0003.jpg'
         valid_joint_path = self.data_path / str(int(index)) / 'valid_joints.json'
 
-        segmentation_mask = cv2.cvtColor(cv2.imread(str(segmentation_path)), cv2.COLOR_BGR2GRAY)   
+        if segmentation_path.exists():
+            segmentation_mask = cv2.cvtColor(cv2.imread(str(segmentation_path)), cv2.COLOR_BGR2GRAY)
+            valid_seg = True
+        else:
+            segmentation_mask = np.zeros((self.height, self.width, 3), dtype=np.uint8)
+            valid_seg = False
+            
+
         human_indices = (segmentation_mask < 127)
 
         segmentation_mask[human_indices] = 1
@@ -109,7 +118,7 @@ class SyntheticEventStream(Dataset):
     
         return {
             'rgb_frame_index': index,
-            'valid_seg': True,
+            'valid_seg': valid_seg,
             'ego_j3d': ego_j3d, 
             'ego_j2d': ego_j2d, 
             'segmentation_mask': segmentation_mask,

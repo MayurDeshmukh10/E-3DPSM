@@ -38,8 +38,8 @@ model:
       delta_j3d: 0.01
       seg: 0.1
 
-    dataset_type:  synthetic #synthetic #synthetic # real
-    training_type: pretrain #pretrain #pretrain #finetune #pretrain # finetune
+    dataset_type:  real #synthetic #synthetic # real
+    training_type: finetune #pretrain #pretrain #finetune #pretrain # finetune
     use_bg_augmentation: false
     temporal_steps: 10
     sample_step: 5
@@ -48,7 +48,7 @@ model:
 
     dataset:
       syn_preprocessed_input_path: /scratch/inf0/user/mdeshmuk/EE3D-preprocessed/EE3D-S
-      real_preprocessed_input_path: "" 
+      real_preprocessed_input_path: "/scratch/inf0/user/mdeshmuk/EE3D-preprocessed/EE3D-R" 
       syn_dataset_root_path: /CT/datasets07/nobackup/EE3D-S
       syn_test_dataset_root_path: /CT/datasets07/nobackup/EE3D-S-Test
       real_dataset_root_path: /CT/datasets07/nobackup/EE3D-R/Real_Dataset
@@ -65,6 +65,7 @@ trainer:
   devices: 1
   # num_nodes: 2
   benchmark: false
+  detect_anomaly: true
   # profiler: advanced
   # precision: bf16-mixed
   strategy: ddp_find_unused_parameters_true
