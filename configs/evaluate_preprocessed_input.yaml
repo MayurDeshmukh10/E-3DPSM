@@ -25,25 +25,34 @@ model:
       delta_j3d: 0.01
       seg: 0.1
 
-    dataset_type:  synthetic # real
-    training_type: pretrain #finetune #pretrain # finetune
+    # dataset_type:  synthetic #real #synthetic # real
+    # training_type: pretrain #finetune #pretrain #finetune #pretrain # finetune
+    dataset_type:  real #real #synthetic # real
+    training_type: finetune #finetune #pretrain #finetune #pretrain # finetune
     use_bg_augmentation: false
     temporal_steps: 10
     sample_step: 0 # not used currently
     batch_size: 1
     workers: 14
+    tbptt_steps: 1000
+    fixed_sequence_length: 1000
 
     dataset:
       syn_preprocessed_input_path: /scratch/inf0/user/mdeshmuk/EE3D-preprocessed/EE3D-S
-      real_preprocessed_input_path: "" 
+      real_preprocessed_input_path: /scratch/inf0/user/mdeshmuk/EE3D-preprocessed/EE3D-R  #-33msec
       syn_dataset_root_path: /CT/datasets07/nobackup/EE3D-S
       syn_test_dataset_root_path: /CT/datasets07/nobackup/EE3D-S-Test
       real_dataset_root_path: /CT/datasets07/nobackup/EE3D-R/Real_Dataset
+      bg_dataset_root_path: /CT/datasets07/nobackup/EE3D-R/Background_Dataset
+      bg_preprocessed_input_path: /scratch/inf0/user/mdeshmuk/EE3D-preprocessed/EE3D-BG
+
 
 
 # ckpt_path: /CT/EventEgo3Dv2/work/EventEgo3Dv2/results/wandb_data/pretraining_preprocessed_dp_attention_6/EventEgo3Dv2/e7syun8j/checkpoints/epoch=30.ckpt
 
-ckpt_path: /CT/EventEgo3Dv2/work/EventEgo3Dv2/results/wandb_data/pretraining_preprocessed_dp_attention_7/EventEgo3Dv2/oom8c1go/checkpoints/epoch=40.ckpt
+# ckpt_path: /CT/EventEgo3Dv2/work/EventEgo3Dv2/results/wandb_data/pretraining_preprocessed_dp_attention_7/EventEgo3Dv2/oom8c1go/checkpoints/epoch=40.ckpt
+
+ckpt_path: /CT/EventEgo3Dv2/work/EventEgo3Dv2/results/wandb_data/finetune_preprocessed_dp_attention_2/EventEgo3Dv2/zjinadvr/checkpoints/epoch=46.ckpt
 
 trainer:
   accelerator: gpu
@@ -91,4 +100,4 @@ trainer:
   - class_path: pytorch_lightning.loggers.TensorBoardLogger
     init_args:
       save_dir: ./results/
-      name: eval_attention_t_10_epoch_40_kalman_filtering_updated  # TensorBoard experiment name
+      name: eval_att_finetuning_epoch_46_kf  # TensorBoard experiment name

@@ -4,3 +4,4 @@ from .Joints3DDataset import Joints3DDataset
 from .egoevent_augment import AugmentedEgoEvent
 from .temporal_wrapper import TemoralWrapper
 from .egoevent_combined import CombinedEgoEvent
+from .egoevent_sequence import EgoEventSequence

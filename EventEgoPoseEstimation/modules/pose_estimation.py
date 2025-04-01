@@ -32,7 +32,7 @@ from EventEgoPoseEstimation.model import EgoHPE
 
 from EventEgoPoseEstimation.dataset.dataset_utils import collate_variable_size, create_image, camera_to_j2d_batch
 
-from EventEgoPoseEstimation.dataset import EgoEvent, AugmentedEgoEvent, TemoralWrapper, CombinedEgoEvent
+from EventEgoPoseEstimation.dataset import EgoEvent, AugmentedEgoEvent, TemoralWrapper, CombinedEgoEvent, EgoEventSequence
 
 from EventEgoPoseEstimation.utils.utils import AverageMeter, save_checkpoint, create_logger
 
@@ -40,9 +40,9 @@ from EventEgoPoseEstimation.utils.skeleton import Skeleton
 
 from configs.settings import config as cfg
 
-from EventEgoPoseEstimation.core.function import compute_fn, _print_name_value, compute_fn_v2, compute_fn_v3
+from EventEgoPoseEstimation.core.function import compute_fn, _print_name_value, compute_fn_v2, compute_fn_v3, compute_fn_v4
 
-from EventEgoPoseEstimation.core.evaluate import accuracy, accuracy_with_vis, accuracy_test
+from EventEgoPoseEstimation.core.evaluate import accuracy, accuracy_with_vis, accuracy_test, create_concatenated_image
 
 from EventEgoPoseEstimation.core.kalman_filter import apply_kalman_filtering
 
@@ -51,6 +51,8 @@ from EventEgoPoseEstimation.core.loss import SegmentationLoss, BoneLengthLoss, J
 from EventEgoPoseEstimation.utils.vis import save_pose_images, save_debug_images, save_debug_3d_joints, save_debug_segmenation, save_debug_eros, generate_skeleton_image, dump_sketelon_image, drift_plot
 
 from EventEgoPoseEstimation.core.inference import get_j2d_from_hms
+from EventEgoPoseEstimation.dataset.dataset_utils import event_augmentation, save_augmented_data
+
 
 import ocam
 
@@ -161,6 +163,8 @@ class EventEgoPoseEstimation(LightningModule):
         use_bg_augmentation: bool,
         batch_size: int,
         workers: int,
+        tbptt_steps: int,
+        fixed_sequence_length: int,
         lr: float,
         lr_decay_epochs: tuple,
         loss_weights: dict,
@@ -178,6 +182,9 @@ class EventEgoPoseEstimation(LightningModule):
         self.syn_dataset_root_path = dataset['syn_dataset_root_path']
         self.syn_test_dataset_root_path = dataset['syn_test_dataset_root_path']
         self.real_dataset_root_path = dataset['real_dataset_root_path']
+        self.bg_dataset_root_path = dataset['bg_dataset_root_path']
+        self.bg_preprocessed_input_path = dataset['bg_preprocessed_input_path']
+
 
         self.training_type = training_type
 
@@ -196,6 +203,10 @@ class EventEgoPoseEstimation(LightningModule):
         self.lr_decay_epochs = lr_decay_epochs
 
         self.temporal_steps = temporal_steps
+
+        self.fixed_sequence_length = fixed_sequence_length
+        self.truncated_bptt_steps = tbptt_steps
+
 
         self.train_dataset: Optional[Dataset] = None
         self.eval_dataset: Optional[Dataset] = None
@@ -296,6 +307,28 @@ class EventEgoPoseEstimation(LightningModule):
                 assert False, f"Invalid training type: {self.training_type}"
 
         # TODO: Fix this
+        # if stage == "test" or stage == "predict":
+        #     if self.training_type == 'pretrain':
+
+        #         # cfg.DATASET.SYN_ROOT = cfg.DATASET.SYN_TEST_ROOT 
+        #         # cfg.DATASET.TYPE = 'Synthetic'
+        #         # cfg.DATASET.BG_AUG = False
+        #         # cfg.DATASET.TRAIN_TEST_SPLIT = 0
+        #         test_dataset = self.syn_test_dataset_root_path
+        #         test_preprocessed_input = self.syn_preprocessed_input_path
+
+        #     elif self.training_type == 'finetune':
+        #         # cfg.DATASET.TYPE = 'Real'
+        #         # cfg.DATASET.BG_AUG = False
+        #         test_dataset = self.real_dataset_root_path
+        #         test_preprocessed_input = self.real_preprocessed_input_path
+        #     else:
+        #         assert False, f"Invalid training type: {self.training_type}"
+ 
+
+        #     test_dataset = EgoEvent(cfg, test_preprocessed_input, test_dataset, temporal_bins=self.temporal_bins, split='test')
+        #     self.test_dataset = TemoralWrapper(test_dataset, self.temporal_steps, split='test', sample_step=self.sample_step)
+
         if stage == "test" or stage == "predict":
             if self.training_type == 'pretrain':
 
@@ -313,18 +346,19 @@ class EventEgoPoseEstimation(LightningModule):
                 test_preprocessed_input = self.real_preprocessed_input_path
             else:
                 assert False, f"Invalid training type: {self.training_type}"
- 
 
-            test_dataset = EgoEvent(cfg, test_preprocessed_input, test_dataset, temporal_bins=self.temporal_bins, split='test', finetune=True)
-            self.test_dataset = TemoralWrapper(test_dataset, self.temporal_steps, split='test', sample_step=self.sample_step)
 
-            # cfg.DATASET.TYPE = 'Synthetic'
-            # cfg.DATASET.SYN_ROOT = cfg.DATASET.SYN_TEST_ROOT 
-            # self.test_dataset = TemoralWrapper(EgoEvent(cfg, temporal_bins=self.temporal_bins, split='val'), self.temporal_steps, split='val', sample_step=self.sample_step)
-            # self.train_dataset = TemoralWrapper(pretrain_dataset, self.temporal_steps, split='train', sample_step=self.sample_step)
+            self.test_dataset = EgoEventSequence(cfg, 
+                                        test_preprocessed_input,
+                                        test_dataset,
+                                        self.bg_preprocessed_input_path,
+                                        self.bg_dataset_root_path,
+                                        training_type=self.training_type,
+                                        use_bg_augmentation=False,
+                                        fixed_sequence_length=self.fixed_sequence_length,
+                                        temporal_bins=self.temporal_bins, 
+                                        split='test')
 
-            # pretrain_dataset = EgoEvent(cfg, temporal_bins=self.temporal_bins, split='test')
-            # self.test_dataset = TemoralWrapper(pretrain_dataset, self.temporal_steps, split='test', sample_step=self.sample_step)
 
     def train_dataloader(self):
         print("Total workers : ", self.workers)
@@ -355,8 +389,8 @@ class EventEgoPoseEstimation(LightningModule):
     def test_dataloader(self):
         dataloader =  torch.utils.data.DataLoader(
             self.test_dataset,
-            batch_size=self.batch_size,
-            # collate_fn=collate_variable_size,
+            batch_size=1,
+            collate_fn=lambda x: x[0],
             num_workers=self.workers,
             pin_memory=True, # TODO: check this
             drop_last=True
@@ -364,8 +398,9 @@ class EventEgoPoseEstimation(LightningModule):
         self.val_dataloader_len = len(dataloader)
         return dataloader
 
-    def on_load_checkpoint(self, checkpoint: dict):
-        checkpoint['optimizer_states'][0]['param_groups'][0]['lr'] =  self.lr
+
+    # def on_load_checkpoint(self, checkpoint: dict):
+    #     checkpoint['optimizer_states'][0]['param_groups'][0]['lr'] =  self.lr
 
     def training_step(self, batch, batch_idx):
         end = time.time()
@@ -462,28 +497,31 @@ class EventEgoPoseEstimation(LightningModule):
         return loss
 
     def eval_step(self, batch, batch_idx, prefix, vis=False):
-        end = time.time()
         self.model.eval()
 
-        # if batch_idx != 2136:
-        #     return
-        
-        # desired_idx = 2724 
-        # batch = self.get_batch_by_idx(desired_idx, mode="test")
-        # self.log("debug_batch_idx", desired_idx)
-
-
         if vis == False:
-            # try:
-            inps, outputs, gt_hms, gt_abs_poses_og, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index, pose_filename = compute_fn_v3(self.model, batch)
-            # except RuntimeError as e:
-                # logger.info("Error in batch : {}".format(e))
-                # return
 
+            # for idx in range(0, self.fixed_sequence_length, self.truncated_bptt_steps):
+            start_time = time.time()
+
+            # start = idx
+            start = 0
+
+            # end = start + self.truncated_bptt_steps
+            end = start + len(batch)
+            # import pdb; pdb.set_trace()
+
+            data_batch = batch[start:end]
+
+
+            batch_d = torch.utils.data._utils.collate.default_collate([data_batch])
+
+
+            inps, outputs, gt_hms, gt_abs_poses_og, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index, pose_filename = compute_fn_v4(self.model, batch_d)
             
-            meta = {'j3d': gt_abs_poses_og, 'j2d': gt_j2d, 'vis_j2d': vis_j2d, 'vis_j3d': vis_j3d}
-
-            pred_abs_poses_t = outputs['abs_poses'] * 1000 # scale to mm 
+            pred_abs_poses_t = outputs['abs_poses'] * 1000 # scale to mm  (previous pose + current delta + kalman filtering)
+            # pred_abs_poses_t = outputs['poses_old'] * 1000 # previous pose + current delta + no kalman filtering
+            # pred_abs_poses_t = outputs['all_abs_poses'] * 1000 # only current predicted abs pose
             gt_j3d_t = gt_abs_poses_og * 1000 # scale to mm
 
             pred_delta_poses = outputs['delta_poses'] * 1000 
@@ -536,17 +574,23 @@ class EventEgoPoseEstimation(LightningModule):
             # # pred_abs_poses = pred_abs_poses[-1, :, :, :] # use abs poses of last temporal step
             # # gt_abs_poses = gt_abs_poses[-1, :, :, :]
 
-            pred_abs_poses = pred_abs_poses_t[-1, :, :, :] # use abs poses of last temporal step
+            # pred_abs_poses = pred_abs_poses_t[-1, :, :, :] # use abs poses of last temporal step
             # pred_abs_poses = fused_abs_poses[-1, :, :, :] # use abs poses of last temporal step
 
-            gt_abs_poses = gt_j3d_t[-1, :, :, :]
+            # gt_abs_poses = gt_j3d_t[-1, :, :, :]
             valid_j3d_t = valid_j3d
 
+            pred_abs_poses = pred_abs_poses_t
+            gt_abs_poses = gt_j3d_t
 
-            valid_j3d = valid_j3d[-1, :, :, :]
-            vis_j3d = vis_j3d[-1, :, :, :]
+
+            # valid_j3d = valid_j3d[-1, :, :, :]
+            # vis_j3d = vis_j3d[-1, :, :, :]
+
+
             gt_j3d = gt_j3d_t.squeeze(1)
-            valid_j3d = valid_j3d.squeeze(1)
+            # valid_j3d = valid_j3d.squeeze(1)
+
 
             val_loss_j3d = self.criterions['j3d'](pred_abs_poses.unsqueeze(0), gt_abs_poses.unsqueeze(0), vis_j3d.unsqueeze(0) * self.wgt_j3d)
             self.j3d_loss_val.update(val_loss_j3d, inps.size(0))
@@ -556,8 +600,36 @@ class EventEgoPoseEstimation(LightningModule):
             # memory_usage_mb = process.memory_info().rss / (1024 ** 2)
 
             # print(f"Current process memory usage: {memory_usage_mb:.2f} MB")
-            
-            avg_acc, cnt = accuracy(gt_abs_poses, pred_abs_poses, valid_j3d)
+
+            # pred_abs_poses_no_kf = outputs['poses_old'] * 1000 # previous pose + current delta + no kalman filtering
+            # pred_abs_poses_only = outputs['all_abs_poses'] * 1000 # only current predicted abs pose
+
+            # a_abs_only = []
+            # a_w_kf = []
+            # a_wo_kf = []
+            # import pdb; pdb.set_trace()
+
+            # for i in range(len(batch)):
+            #     # acc_no_pf, _ = accuracy(gt_abs_poses[i], pred_abs_poses_no_kf[i], valid_j3d[i])
+            #     # acc_only_abs, _ = accuracy(gt_abs_poses[i], pred_abs_poses_only[i], valid_j3d[i])
+
+            #     # avg_acc, cnt = accuracy(gt_abs_poses[i], pred_abs_poses[i], valid_j3d[i])
+            #     # a_abs_only.append(acc_only_abs)
+            #     # a_w_kf.append(avg_acc)
+            #     # a_wo_kf.append(acc_no_pf)
+
+            #     color = dump_sketelon_image(gt_abs_poses_og[i][0].detach(), outputs['abs_poses'][i][0].detach(), f"./visualizations/new_dataloader")
+            #     voxel_image = save_augmented_data(inps[i], 'test')
+            #     concatenated_image = create_concatenated_image(color, voxel_image)
+            #     output_path = f"./visualizations/output_for_vis_lnes/{i}.png"
+            #     cv2.imwrite(output_path, concatenated_image)
+
+
+
+
+            # avg_acc = torch.Tensor(a_w_kf)
+            # acc_only_abs = torch.Tensor(a_abs_only)
+            # acc_no_pf = torch.Tensor(a_wo_kf)
 
             # all_pred_abs = outputs['all_abs_poses'] * 1000
             # poses_old = outputs['poses_old'] * 1000
@@ -572,7 +644,17 @@ class EventEgoPoseEstimation(LightningModule):
             # filtered_avg_acc_all_steps, cnt_0 = accuracy_test(gt_j3d_t[:, 0, ...], fused_abs_poses[:, 0, ...], valid_j3d_t[:, 0, ...])
             # filtered_avg_acc_all_steps_q10, cnt_0 = accuracy_test(gt_j3d_t[:, 0, ...], fused_abs_poses1[:, 0, ...], valid_j3d_t[:, 0, ...])
 
-            # drift_plot(delta_avg_acc_all_steps, abs_avg_acc_all_steps, pose_old_avg_acc_all_steps)
+            # import pdb; pdb.set_trace()
+
+            # seq_end = 20
+
+            # acc_no_pf, _ = accuracy(gt_abs_poses, pred_abs_poses_no_kf, valid_j3d)
+            # acc_only_abs, _ = accuracy(gt_abs_poses, pred_abs_poses_only, valid_j3d)
+
+            # avg_acc, cnt = accuracy(gt_abs_poses, pred_abs_poses, valid_j3d)
+
+
+            # drift_plot(avg_acc[:seq_end], acc_only_abs[:seq_end], acc_no_pf[:seq_end])
 
             # import pdb; pdb.set_trace()
 
@@ -582,45 +664,34 @@ class EventEgoPoseEstimation(LightningModule):
 
             # for i in range(gt_abs_poses_og.size(0)):
             #     dump_sketelon_image(gt_abs_poses_og[i][0].detach(), outputs['abs_poses'][i][0].detach(), f"./visualizations/new_dataloader/{batch_idx}_bin-{i}_mpjpe_{avg_acc.item()}.png")
-        
-            # print("Val ", self.acc_j3d_val.val)
-            # print("Avg ", self.acc_j3d_val.avg)
-            # print("Cnt ", self.acc_j3d_val.count)
+            
+            avg_acc, cnt = accuracy(gt_abs_poses, pred_abs_poses, valid_j3d)
             self.acc_j3d_val.update(avg_acc, cnt)
             
             # measure elapsed time
-            self.batch_time.update(time.time() - end)
+            self.batch_time.update(time.time() - start_time)
             end = time.time()
-
-            self.log('val_loss', self.j3d_loss_val.avg, sync_dist=True, batch_size=self.batch_size)
-            self.log('val_acc', self.acc_j3d_val.avg, sync_dist=True, batch_size=self.batch_size)
 
             self.all_preds_j3d.append(pred_abs_poses.detach().cpu())
             self.all_gt_j3ds.append(gt_abs_poses.detach().cpu())
             self.all_vis_j3d.append(valid_j3d.detach().cpu())
             self.all_frame_indices.append(frame_index.detach().cpu())
 
-            if batch_idx % cfg.PRINT_FREQ == 0:
 
-                self.global_val_steps = self.global_val_steps + 1
-                
-                msg = 'Test: [{0}/{1}]\t' \
-                    'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t' \
-                    'MPJPE {acc.val:.4f} ({acc.avg:.4f})\t' \
-                    'Val loss  {val_loss.val:.4f} ({val_loss.avg:.4f})\t'.format(
-                        batch_idx, self.trainer.num_val_batches, batch_time=self.batch_time,
-                        acc=self.acc_j3d_val, val_loss=self.j3d_loss_val)
-                logger.info(msg)
+            self.log('val_loss', self.j3d_loss_val.avg, sync_dist=True, batch_size=self.batch_size)
+            self.log('val_acc', self.acc_j3d_val.avg, sync_dist=True, batch_size=self.batch_size)
 
-                # try:
-                #     inp = inp.detach().cpu().numpy()
-                #     gt_j3d = gt_j3d.detach()
-                #     pred_j3d = pred_j3d.detach()
-                #     # gt_j3d = gt_j3d.detach().cpu().numpy()
-                #     import pdb; pdb.set_trace()
-                #     save_debug_3d_joints(self, cfg, inp, meta, gt_j3d, pred_j3d, 'val', global_step=self.global_val_steps)
-                # except Exception as e:
-                #     logger.error("Error in saving val debug data : {}".format(e))
+            # if batch_idx % cfg.PRINT_FREQ == 0:
+
+            self.global_val_steps = self.global_val_steps + 1
+            
+            msg = 'Test: [{0}/{1}]\t' \
+                'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t' \
+                'MPJPE {acc.val:.4f} ({acc.avg:.4f})\t' \
+                'Val loss  {val_loss.val:.4f} ({val_loss.avg:.4f})\t'.format(
+                    batch_idx, self.trainer.num_val_batches, batch_time=self.batch_time,
+                    acc=self.acc_j3d_val, val_loss=self.j3d_loss_val)
+            logger.info(msg)
 
         elif prefix == "test" and vis == True:
             global_steps=batch_idx

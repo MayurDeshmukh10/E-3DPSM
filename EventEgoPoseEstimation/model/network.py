@@ -247,10 +247,20 @@ class EgoHPE(nn.Module):
         re_poses = []
         poses_old = []
 
+        # ----------working code --------------------------------------------------
         state_vector_dim = 16 * 3
         measurement_vector_dim = 16 * 3 
         dim = 16 * 3
         dt = 1/1000.0
+        measurement_var = 1e-2 # work pretty well (R)
+        process_var = 1e-3  # work pretty well (Q)
+
+        # measurement_var = 5e-3
+        # process_var = 5e-4
+
+        # measurement_var = 5e-3
+        # process_var = 1e-4
+
 
 
         kf = KalmanFilter(dim_x=state_vector_dim, dim_z=measurement_vector_dim)
@@ -261,13 +271,53 @@ class EgoHPE(nn.Module):
         
         
         # kf.Q = np.eye(dim) * process_var # Process noise covariance matrix: uncertainty in the prediction (delta)
-        measurement_var = 1e-2
+        
+        # measurement_var = 1e-4 # In Testing
+        # measurement_var = 3.0045 # variance calculate on test set without kf only abs poses
+
         kf.R = np.eye(dim) * measurement_var # Measure
 
         # kf.R *= 5
         # kf.Q = Q_discrete_white_noise(1, dt, .1, block_size=dim)
-        process_var = 1e-3  # or another value tuned to your system
+        # process_var = 1e-4  # low accuracy, more stability
+        # process_var = 1e-5  # IN testing
+        # process_var = 1e-1  # IN testing
+
         kf.Q = np.eye(48) * process_var
+
+
+        # ---------------------------------------------------------------------------------------------------
+
+        # Adding velocities
+
+        # num_joints = 16
+        # pos_dim = num_joints * 3       # 48
+        # state_vector_dim = pos_dim * 2 # 96 (positions + velocities)
+        # measurement_vector_dim = pos_dim  # 48
+        # dt = 1/1000.0
+
+        # kf = KalmanFilter(dim_x=state_vector_dim, dim_z=measurement_vector_dim)
+
+        # I_pos = np.eye(pos_dim)
+        # F = np.block([
+        #     [I_pos, dt * I_pos],
+        #     [np.zeros((pos_dim, pos_dim)), I_pos]
+        # ])
+        # kf.F = F
+
+        # B = np.block([
+        #     [np.zeros((pos_dim, pos_dim))],
+        #     [I_pos]
+        # ])
+        # kf.B = B
+
+        # H = np.hstack([I_pos, np.zeros((pos_dim, pos_dim))])
+        # kf.H = H
+
+        # process_var = 1e-3  # Tuning parameter (for the process noise)
+        # measurement_var = 1e-2  # Tuning parameter (for the measurement noise)
+        # kf.Q = np.eye(state_vector_dim) * process_var
+        # kf.R = np.eye(measurement_vector_dim) * measurement_var
 
 
 
@@ -363,14 +413,14 @@ class EgoHPE(nn.Module):
         # re_poses = torch.stack(re_poses)
         
         outputs = {}
-        outputs['abs_poses'] = abs_poses  
+        outputs['abs_poses'] = abs_poses  # previous pose + current delta + kalman filtering
         outputs['seg'] = seg_outs
         outputs['delta_poses'] = delta_poses
         # outputs['heatmaps'] = heatmaps
         outputs['voxel_representations'] = voxel_representations
 
-        outputs['all_abs_poses'] = all_abs_poses
-        outputs['poses_old'] = poses_old
+        outputs['all_abs_poses'] = all_abs_poses # only current predicted abs pose
+        outputs['poses_old'] = poses_old # previous pose + current delta + no kalman filtering
         # outputs['re_poses'] = re_poses
         # outputs['s5_states'] = s5_states
  

@@ -319,8 +319,8 @@ def dump_sketelon_image(gt_j3d, pred_j3d, file_name):
     if pred_node is not None:
         scene.remove_node(pred_node)
 
-    # return color
-    cv2.imwrite(file_name, color)
+    return color
+    # cv2.imwrite(file_name, color)
 
     # skeleton = Skeleton((0.9, 0.1, 0.1))
     # node = None
@@ -682,14 +682,16 @@ def drift_plot(delta_mpjpe_errors, abs_mpjpe_errors, old_pose_errors):
 
     # time_steps = mpjpe_errors.shape[0]
     time_steps = np.arange(delta_mpjpe_errors.shape[0])
-    plt.figure(figsize=(8, 4))
-    plt.plot(time_steps, delta_mpjpe_errors, marker='o', linestyle='-', color='r')
-    plt.plot(time_steps, abs_mpjpe_errors, marker='o', linestyle='-', color='b')
+    # plt.figure(figsize=(8, 4))
+    plt.figure(figsize=(16, 6))
+    plt.plot(time_steps, delta_mpjpe_errors, marker=None, linestyle='-', color='b', label='With Kalman Filter')
+    plt.plot(time_steps, abs_mpjpe_errors, marker=None, linestyle='--', color='k', label='Only Abs. Pose (w/o delta)')
     # plt.plot(time_steps, re_poses, marker='o', linestyle='-', color='g')
-    plt.plot(time_steps, old_pose_errors, marker='o', linestyle='-', color='g')
+    plt.plot(time_steps, old_pose_errors, marker=None, linestyle='--', color='r', label='Without Kalman Filter (Previous Pose + Delta)')
     plt.xlabel('Time Step')
     plt.ylabel('Mean Per Joint Position Error (mm)')
-    plt.title('Drift Over Time in 3D Pose Estimation')
-    plt.grid(True)
+    plt.title('Test Pose Sequence (First 100 input samples)')
+    plt.legend()  # Add legend to show labels
+    # plt.grid(True)
     plt.savefig("/CT/EventEgo3Dv2/work/EventEgo3Dv2/drift_error.png")
-
+    plt.close()

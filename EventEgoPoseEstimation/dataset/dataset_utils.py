@@ -299,10 +299,10 @@ def save_augmented_data(data, path):
     # [positive, blank, negative]
     image = np.concatenate([positive_channel, blank_channel, negative_channel], axis=2)
 
-    # return image
+    return image
     
     # Save the image using OpenCV
-    cv2.imwrite(path, image)
+    # cv2.imwrite(path, image)
 
 def save_mask_image(mask, path):
     """
