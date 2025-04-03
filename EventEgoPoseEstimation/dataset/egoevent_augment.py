@@ -19,46 +19,55 @@ from EventEgoPoseEstimation.dataset.egoevent import SingleSequenceDataset
 
 
 class AugmentedEgoEvent(Dataset): 
-    def __init__(self, cfg, target_dataset, split, temporal_bins):
+    def __init__(self, cfg, target_dataset, bg_data_root, bg_preprocessed_root, split, temporal_bins):
         super().__init__()
         cfg = copy.deepcopy(cfg)
-        
-        cfg.DATASET.TYPE = 'Real'
 
+
+        self.bg_dataset_path = Path(bg_data_root)
+        self.bg_preprocessed_item_path = Path(bg_preprocessed_root)
+        
         self.target_dataset = target_dataset
-        is_train = target_dataset.is_train
-        dataset_root = Path(cfg.DATASET.BACKGROUND_DATASET_ROOT)
+
         self.temporal_bins = temporal_bins
 
         self.split = split
+
+        is_train = target_dataset.is_train
         
-        datasets = list()
-        for item in os.listdir(dataset_root):
-            data_path = dataset_root / item
+        # datasets = list()
+        # for item in os.listdir(dataset_root):
+        #     data_path = dataset_root / item
             
-            if os.path.isdir(data_path):
-                dataset = SingleSequenceDataset(cfg, data_path, is_train, split, temporal_bins, augmentation=True)
-                if dataset.isvalid():
-                    self.visualize = dataset.visualize
-                    datasets.append(dataset)
+        #     if os.path.isdir(data_path):
+        #         dataset = SingleSequenceDataset(cfg, data_path, is_train, split, temporal_bins, augmentation=True)
+        #         if dataset.isvalid():
+        #             self.visualize = dataset.visualize
+        #             datasets.append(dataset)
 
-        self.datasets = datasets
-        self.lengths = [len(dataset) for dataset in datasets]
+        self.bg_datasets = list()
+        for item in os.listdir(self.bg_dataset_path):
+            data_path = self.bg_dataset_path / item
+            preprocessed_input_path = self.bg_preprocessed_item_path / item
+            
+            if os.path.isdir(preprocessed_input_path):
+                # dataset = SingleSequenceDataset(cfg, preprocessed_input_path, data_path, is_train, split, temporal_bins, training_type='Real', augmentation=True)
+                dataset = RealEventStream(preprocessed_input_path, data_path, cfg, split, is_train, augmentation=True)
+                self.bg_datasets.append(dataset)
+
+        self.lengths = [len(dataset) for dataset in self.bg_datasets]
         self.total_length = sum(self.lengths)
+        self.bg_datasets_count = len(self.bg_datasets)
 
-        self.data_path = dataset_root
-        self.dataset_root = dataset_root
         self.is_train = is_train
         
-        index_path = Path(tempfile.mkdtemp('egoevent_combined'))        
-        self.indices = generate_indices(index_path, self.datasets)
-        self.index_len = len(self.indices)
+        # index_path = Path(tempfile.mkdtemp('egoevent_combined'))        
+        # self.indices = generate_indices(index_path, self.datasets)
+        # self.index_len = len(self.indices)
 
-        print("Index len: ", self.index_len)
-
-        print(f'BG Dataset root: {dataset_root}, is_train: {is_train}')
+        print(f'BG Dataset root: {self.bg_dataset_path}, is_train: {self.is_train}')
         print('BG Datasets: ')
-        for dataset in datasets:
+        for dataset in self.bg_datasets:
             print(dataset.data_path)
         print('Total number of BG events: ', self.total_length)
 
@@ -72,16 +81,18 @@ class AugmentedEgoEvent(Dataset):
             kwargs = {}
             
         data, meta = self.target_dataset[idx]
+
+        bg_dataset_idx = np.random.randint(0, self.bg_datasets_count)
+        bg_sample_idx = np.random.randint(0, self.lengths[bg_dataset_idx])
         
         meta['use_bg'] = False
 
-        aidx = np.random.randint(0, self.index_len - 1)
-        dataset_idx, sample_idx = self.indices[aidx]
-        bg_data, bg_meta = self.datasets[dataset_idx][sample_idx, kwargs]
-        meta['bg_data'] = bg_data['x']
+        bg_data, frame_id, filename = self.bg_datasets[bg_dataset_idx][bg_sample_idx, {}]
 
-        if torch.sum(meta['vis_j3d']) != 0:
-            if self.split == 'train' and random.random() < 0.5:
+        meta['bg_data'] = bg_data
+
+        if self.split == 'train' and random.random() < 0.5:
+            if torch.sum(meta['vis_j3d']) != 0:
                 meta['use_bg'] = True
         
         return data, meta

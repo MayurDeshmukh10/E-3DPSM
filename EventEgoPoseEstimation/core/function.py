@@ -354,6 +354,9 @@ def compute_fn_v3(model, batch, prev_buffer=None, prev_key=None, batch_first=Fal
     valid_j3d = []
     valid_seg = []
     filename = []
+    use_bg = []
+    bg_data = []
+    vis_ja = []
     for (data, meta) in batch:
         inp = data['x']
         inps.append(inp[None, ...])    
@@ -370,6 +373,9 @@ def compute_fn_v3(model, batch, prev_buffer=None, prev_key=None, batch_first=Fal
         valid_seg_ = meta['valid_seg']
         frame_index_ = meta['frame_index']
         filename_ = meta['pose_filename']
+        use_bg_ = meta['use_bg']
+        bg_data_ = meta['bg_data']
+        vis_ja_ = meta['vis_ja']
         
 
         gt_hms.append(gt_hms_)
@@ -382,6 +388,11 @@ def compute_fn_v3(model, batch, prev_buffer=None, prev_key=None, batch_first=Fal
         valid_j3d.append(valid_j3d_)
         valid_seg.append(valid_seg_)
         filename.append(filename_)
+
+        use_bg.append(use_bg_)
+        bg_data.append(bg_data_)
+        vis_ja.append(vis_ja_)
+
 
         frame_index.append(frame_index_)
 
@@ -400,10 +411,21 @@ def compute_fn_v3(model, batch, prev_buffer=None, prev_key=None, batch_first=Fal
     valid_seg = torch.stack(valid_seg)
     frame_index = torch.stack(frame_index)
 
-    outputs = model(inps, augmentation_data={})
+    use_bg = torch.stack(use_bg)
+    bg_data = torch.stack(bg_data).cuda()
+    vis_ja = torch.stack(vis_ja).cuda()
+
+
+    augmentation_data = {
+        'bg_mask': gt_seg,
+        'use_bg': use_bg,
+        'bg_data': bg_data
+    }
+
+    outputs = model(inps, augmentation_data=augmentation_data)
     
     T, B, C, H, W = inps.shape
-    return inps.view(T * B, C, H, W), outputs, gt_hms, gt_j3d, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index, filename
+    return inps.view(T * B, C, H, W), outputs, gt_hms, gt_j3d, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index, filename, vis_ja
 
 def compute_fn_v4(model, batch, prev_buffer=None, prev_key=None, batch_first=False):
 
@@ -439,8 +461,8 @@ def compute_fn_v4(model, batch, prev_buffer=None, prev_key=None, batch_first=Fal
         frame_index_ = meta['frame_index']
         filename_ = meta['pose_filename']
         use_bg_ = meta['use_bg']
-        # bg_data_ = meta['bg_data']
-        # vis_ja_ = meta['vis_ja']
+        bg_data_ = meta['bg_data']
+        vis_ja_ = meta['vis_ja']
 
         
 
@@ -456,8 +478,8 @@ def compute_fn_v4(model, batch, prev_buffer=None, prev_key=None, batch_first=Fal
         filename.append(filename_)
 
         use_bg.append(use_bg_)
-        # bg_data.append(bg_data_)
-        # vis_ja.append(vis_ja_)
+        bg_data.append(bg_data_)
+        vis_ja.append(vis_ja_)
 
         frame_index.append(frame_index_)
 
@@ -477,13 +499,14 @@ def compute_fn_v4(model, batch, prev_buffer=None, prev_key=None, batch_first=Fal
     frame_index = torch.stack(frame_index)
 
     use_bg = torch.stack(use_bg)
-    # bg_data = torch.stack(bg_data).cuda()
-    # vis_ja = torch.stack(vis_ja).cuda()
+    bg_data = torch.stack(bg_data).cuda()
+    vis_ja = torch.stack(vis_ja).cuda()
 
 
     augmentation_data = {
         'bg_mask': gt_seg,
-        'use_bg': use_bg
+        'use_bg': use_bg,
+        'bg_data': bg_data
     }
 
     # import pdb; pdb.set_trace()
@@ -491,7 +514,7 @@ def compute_fn_v4(model, batch, prev_buffer=None, prev_key=None, batch_first=Fal
     outputs = model(inps, augmentation_data=augmentation_data)
     
     T, B, C, H, W = inps.shape
-    return inps.view(T * B, C, H, W), outputs, gt_hms, gt_j3d, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index, filename
+    return inps.view(T * B, C, H, W), outputs, gt_hms, gt_j3d, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index, filename, vis_ja
 
 def percentile(t, q):
     B, C, H, W = t.shape

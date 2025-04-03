@@ -12,32 +12,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-import numpy as np
-from filterpy.kalman import KalmanFilter
-
-def apply_kf_to_sequence(abs_poses, delta_poses, dt=1/1000., Q_scale=3.0, R_scale=1.0):
-    state_vector_dim = 16 * 3
-    measurement_vector_dim = 16 * 3 
-    dim = 16 * 3
-
-    kf = KalmanFilter(dim_x=state_vector_dim, dim_z=measurement_vector_dim)
-
-    kf.x = abs_poses[0].reshape(-1)
-    
-    # kf.P = np.eye(dim) * 1.0 # State covariance matrix: initial uncertainty in the state
-    kf.F = np.eye(dim) # State transition matrix: identity since state update is additive
-    kf.B = np.eye(dim) # Control transition matrix: identity to map the delta (u) directly to state
-    kf.H = np.eye(dim) # Measurement function: identity since we directly measure joint positions
-    
-    
-    kf.Q = np.eye(dim) * process_var # Process noise covariance matrix: uncertainty in the prediction (delta)
-    kf.R = np.eye(dim) * measurement_var # Measurement noise covariance matrix: uncertainty in the absolute pose measurement
-
-    u = delta_change.reshape(-1, 1)
-    z = abs_pose_measurement.reshape(-1, 1)
-
-    kf.predict(u=u)
-
 
 class JointRegressor(nn.Module):
     def __init__(self, in_channels, num_joints):
@@ -203,7 +177,7 @@ class Event3DPoseNet(nn.Module):
         # --------------working code ----------------------------------
         if first_temporal_step:
             current_pose = self.initial_pose_head(x)
-            kalman_filter.x = current_pose.reshape(-1, 1).cpu()
+            kalman_filter.initialize(current_pose.reshape(B, -1))
             abs_pose = current_pose
             current_pose_old = current_pose
         else:
@@ -211,44 +185,14 @@ class Event3DPoseNet(nn.Module):
             previous_pose_emb = self.pose_embedding(previous_pose)
             x = torch.cat([x, previous_pose_emb], dim=1) # [batch_size, 9216 + 64]
             delta_pose = self.delta_head(x)
-            # import pdb; pdb.set_trace()
 
-            kalman_filter.predict(u=delta_pose.reshape(-1, 1).cpu())
-            kalman_filter.update(abs_pose.reshape(-1, 1).cpu())
-            # import pdb; pdb.set_trace()
-            current_pose = torch.from_numpy(kalman_filter.x.reshape(16, 3)).unsqueeze(0).cuda().float()
+            kalman_filter.predict(u=delta_pose.reshape(B, -1))
+            kalman_filter.update(abs_pose.reshape(B, -1))
+
+            current_pose = kalman_filter.x.reshape(B, 16, 3)
+            
             current_pose_old = previous_pose_old + delta_pose
 
-        # --------------end  ----------------------------------
-        # pos_dim = 16 * 3
-        # num_joints = 16
-        # if first_temporal_step:
-        #     current_pose = self.initial_pose_head(x)  # shape: (1, 16, 3)
-        #     current_pose_flat = current_pose.reshape(-1).cpu().numpy()  # shape: (48,)
-        #     initial_state = np.concatenate([current_pose_flat, np.zeros_like(current_pose_flat)], axis=0)  # shape: (96,)
-        #     kalman_filter.x = initial_state.reshape(-1, 1)
-        #     abs_pose = current_pose
-        #     current_pose_old = current_pose
-        # else:
-        #     # Get the absolute pose measurement (from the absolute pose head)
-        #     abs_pose = self.initial_pose_head(x)  # shape: (1, 16, 3)
-            
-        #     # Prepare the delta (control input) from the network.
-        #     # Here, delta_pose should be interpreted as the update to velocity.
-        #     previous_pose_emb = self.pose_embedding(previous_pose)
-        #     x_cat = torch.cat([x, previous_pose_emb], dim=1)  # [batch_size, ...]
-        #     delta_pose = self.delta_head(x_cat)  # shape: (16, 3)
-        #     u = delta_pose.reshape(-1, 1).cpu().detach().numpy()  # Convert to numpy array, shape: (48, 1)
-            
-        #     # Predict step: update state using the control input (velocity correction)
-        #     kalman_filter.predict(u=u)
-            
-        #     # Update step: incorporate the measurement (absolute pose)
-        #     kalman_filter.update(abs_pose.reshape(-1, 1).cpu().detach().numpy())
-            
-        #     # Extract the position part of the state (first 48 entries)
-        #     current_pose = torch.from_numpy(kalman_filter.x[:pos_dim].reshape(num_joints, 3)).unsqueeze(0).cuda().float()
-        #     current_pose_old = previous_pose_old + delta_pose
 
         final_state = states
 

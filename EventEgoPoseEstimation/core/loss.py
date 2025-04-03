@@ -206,3 +206,82 @@ class BoneOrientationLoss(nn.Module):
             return torch.tensor(0.0, device=output.device)
 
         return total_loss / (total_valid + self.eps)
+
+
+class BoneLoss(nn.Module):
+    heatmap_sequence = ["Head", # 0
+                        "Neck", # 1
+                        "Right_shoulder", # 2 
+                        "Right_elbow", # 3
+                        "Right_wrist", # 4
+                        "Left_shoulder", # 5
+                        "Left_elbow", # 6
+                        "Left_wrist", # 7
+                        "Right_hip", # 8
+                        "Right_knee", # 9
+                        "Right_ankle", # 10
+                        "Right_foot", # 11
+                        "Left_hip", # 12 
+                        "Left_knee", # 13
+                        "Left_ankle", #14
+                        "Left_foot" # 15
+                        ] 
+
+                        # 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15
+    kinematic_parents = [ 0, 0, 1, 2, 3, 1, 5, 6, 2, 8,  9, 10,  5, 12, 13, 14]
+
+    print('Kinematic Parents:')
+    for i in range(len(heatmap_sequence)):
+        print(f'{heatmap_sequence[i]} -> {heatmap_sequence[kinematic_parents[i]]}')
+
+    def __init__(self):
+        super(BoneLoss, self).__init__()
+
+        self.cos_sim = nn.CosineSimilarity(dim=2)
+
+    def forward(self, pose_predicted, pose_gt, ange_weight, length_weight):
+        # New shapes:
+        # pose_predicted: [T, B, 16, 3]
+        # pose_gt:        [T, B, 16, 3]
+        # ange_weight & length_weight: [T, B, 16, 1]
+        
+        T, B, J, D = pose_predicted.shape  # T=50, B=2, J=16, D=3
+
+        # Merge time and batch dimensions to treat them as independent examples.
+        pose_predicted = pose_predicted.view(T * B, J, D)  # [T*B, 16, 3]
+        pose_gt = pose_gt.view(T * B, J, D)                # [T*B, 16, 3]
+        
+        # Similarly, merge and process weights.
+        ange_weight = ange_weight.view(T * B, J, 1)        # [T*B, 16, 1]
+        length_weight = length_weight.view(T * B, J, 1)      # [T*B, 16, 1]
+        
+        # Squeeze the last dimension to get [T*B, 16]
+        ange_weight = ange_weight.squeeze(-1)   # [T*B, 16]
+        length_weight = length_weight.squeeze(-1)  # [T*B, 16]
+        
+        # Average weights over joints to obtain a per-sample weight.
+        ange_weight = torch.mean(ange_weight, dim=1)   # [T*B]
+        length_weight = torch.mean(length_weight, dim=1)  # [T*B]
+        
+        # Compute bone vectors. Assumes self.kinematic_parents is defined such that:
+        #   pose_predicted[:, self.kinematic_parents, :] gives each joint's parent's position.
+        predicted_bone_vector = pose_predicted - pose_predicted[:, self.kinematic_parents, :]
+        gt_bone_vector = pose_gt - pose_gt[:, self.kinematic_parents, :]
+        
+        # Exclude the root joint (first element).
+        predicted_bone_vector = predicted_bone_vector[:, 1:, :]  # [T*B, num_bones, 3] where num_bones = J-1
+        gt_bone_vector = gt_bone_vector[:, 1:, :]
+        
+        # Compute cosine similarity loss for bone directions.
+        # Assuming self.cos_sim computes cosine similarity along the last dimension.
+        cos_loss = 1 - self.cos_sim(predicted_bone_vector, gt_bone_vector)  # [T*B, num_bones]
+        cos_loss = torch.sum(cos_loss, dim=1)   # Sum over bones -> [T*B]
+        cos_loss = torch.mean(cos_loss * ange_weight)  # Weighted average over all examples.
+        
+        # Compute bone length loss.
+        # predicted_bone_length = torch.norm(predicted_bone_vector, p=2, dim=-1)  # [T*B, num_bones]
+        # gt_bone_length = torch.norm(gt_bone_vector, p=2, dim=-1)                # [T*B, num_bones]
+        # bone_length_loss = torch.sum((predicted_bone_length - gt_bone_length) ** 2, dim=1)  # [T*B]
+        # bone_length_loss = torch.mean(bone_length_loss * length_weight)
+        
+        return cos_loss

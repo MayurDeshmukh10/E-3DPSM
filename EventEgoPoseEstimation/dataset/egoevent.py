@@ -60,11 +60,15 @@ class SingleSequenceDataset(Joints3DDataset):
         if j3d is None or j2d is None:
             vis_j2d = np.zeros((self.num_joints, 2))
             vis_j3d = np.zeros((self.num_joints, 3))
+            vis_ja = np.zeros((self.num_joints, 1))
+
             j3d = np.ones((self.num_joints, 3)) * -1
             j2d = np.ones((self.num_joints, 2)) * -1
         else:
             vis_j2d = np.ones_like(j2d)
             vis_j3d = np.ones_like(j3d)
+            vis_ja = np.ones((self.num_joints, 1))
+
 
         if ego_to_global_space is None:
             ego_to_global_space = np.eye(4)
@@ -85,6 +89,7 @@ class SingleSequenceDataset(Joints3DDataset):
                 'j3d': j3d.astype(np.float32),	
                 'vis_j2d': vis_j2d.astype(np.float32),
                 'vis_j3d': vis_j3d.astype(np.float32),
+                'vis_ja': vis_ja.astype(np.float32),
                 'segmentation_mask': segmentation_mask,
                 'ego_to_global_space': ego_to_global_space,
                 'rgb_frame_index': int(rgb_frame_index)

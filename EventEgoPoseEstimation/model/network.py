@@ -10,187 +10,7 @@ from EventEgoPoseEstimation.dataset.dataset_utils import event_augmentation, sav
 from filterpy.kalman import KalmanFilter
 from filterpy.common import Q_discrete_white_noise
 
-# class ValueLayer(nn.Module):
-#     def __init__(self, mlp_layers, activation=nn.ReLU(), num_channels=9):
-#         assert mlp_layers[-1] == 1, "Last layer of the mlp must have 1 input channel."
-#         assert mlp_layers[0] == 1, "First layer of the mlp must have 1 output channel"
-
-#         nn.Module.__init__(self)
-#         self.mlp = nn.ModuleList()
-#         self.activation = activation
-
-#         # create mlp
-#         in_channels = 1
-#         for out_channels in mlp_layers[1:]:
-#             self.mlp.append(nn.Linear(in_channels, out_channels))
-#             in_channels = out_channels
-
-#         # init with trilinear kernel
-#         path = join(dirname(__file__), "quantization_layer_init", f"{num_channels}_trilinear_init.pth")
-#         if isfile(path):
-#             state_dict = torch.load(path)
-#             self.load_state_dict(state_dict)
-#         else:
-#             self.init_kernel(num_channels)
-
-#     def forward(self, x):
-#         # create sample of batchsize 1 and input channels 1
-#         x = x[None,...,None]
-
-#         # apply mlp convolution
-#         for i in range(len(self.mlp[:-1])):
-#             x = self.activation(self.mlp[i](x))
-
-#         x = self.mlp[-1](x)
-#         x = x.squeeze()
-
-#         return x
-
-#     def init_kernel(self, num_channels):
-#         ts = torch.zeros((1, 2000))
-#         optim = torch.optim.Adam(self.parameters(), lr=1e-2)
-
-#         torch.manual_seed(1)
-
-#         for _ in range(1000):  # converges in a reasonable time
-#             optim.zero_grad()
-
-#             ts.uniform_(-1, 1)
-
-#             # gt
-#             gt_values = self.trilinear_kernel(ts, num_channels)
-
-#             # pred
-#             values = self.forward(ts)
-
-#             # optimize
-#             loss = (values - gt_values).pow(2).sum()
-
-#             loss.backward()
-#             optim.step()
-        
-#         save_path = join(dirname(__file__), "quantization_layer_init", f"{num_channels}_trilinear_init.pth")
-#         torch.save(self.state_dict(), save_path)
-
-
-#     def trilinear_kernel(self, ts, num_channels):
-#         gt_values = torch.zeros_like(ts)
-
-#         gt_values[ts > 0] = (1 - (num_channels-1) * ts)[ts > 0]
-#         gt_values[ts < 0] = ((num_channels-1) * ts + 1)[ts < 0]
-
-#         gt_values[ts < -1.0 / (num_channels-1)] = 0
-#         gt_values[ts > 1.0 / (num_channels-1)] = 0
-
-#         return gt_values
-
-
-# class QuantizationLayer(nn.Module):
-#     def __init__(self, dim,
-#                  batch_size,
-#                  mlp_layers=[1, 100, 100, 1],
-#                  activation=nn.LeakyReLU(negative_slope=0.1)):
-#         nn.Module.__init__(self)
-#         self.value_layer = ValueLayer(mlp_layers,
-#                                       activation=activation,
-#                                       num_channels=dim[0])
-#         self.dim = dim
-#         self.batch_size = batch_size
-
-#     def forward(self, events_list, device):
-
-#         B = len(events_list)
-
-#         num_voxels = int(2 * np.prod(self.dim) * B)
-#         # vox = events_list[0][0].new_full([num_voxels,], fill_value=0)
-#         vox = torch.zeros(num_voxels, device=device)
-
-#         C, H, W = self.dim
-
-#         # x_values = [events[:, 0] for events in events_list]
-#         # y_values = [events[:, 1] for events in events_list]
-#         # t_values = [events[:, 2] for events in events_list]
-#         # p_values = [events[:, 3] for events in events_list]
-#         # b_values = [i * torch.ones((len(events)), device=device) for i, events in enumerate(events_list)]
-        
-
-#         # x = torch.cat(x_values, dim=0)
-#         # y = torch.cat(y_values, dim=0)
-#         # t = torch.cat(t_values, dim=0)
-#         # p = torch.cat(p_values, dim=0)
-#         # b = torch.cat(b_values, dim=0)
-
-#         # p = (p+1)/2  # maps polarity to 0, 1
-
-#         # x_idx = x
-#         # y_idx = W * y
-#         # channel_offset = W * H * C * p
-#         # batch_offset = W * H * C * 2 * b
-
-#         # # Summing to get final index
-#         # idx_before_bins = x_idx + y_idx + channel_offset + batch_offset
-
-#         x = torch.cat([events[:, 0] for events in events_list], dim=0)
-#         y = torch.cat([events[:, 1] for events in events_list], dim=0)
-#         t = torch.cat([events[:, 2] for events in events_list], dim=0)
-#         p = torch.cat([(events[:, 3] + 1) / 2 for events in events_list], dim=0)  # Map polarity to 0, 1
-#         b = torch.cat([i * torch.ones(len(events), device=device) for i, events in enumerate(events_list)], dim=0)
-
-#         # Precompute base indices components
-#         idx_before_bins = (x + W * y + (W * H * C) * p + (W * H * C * 2) * b)
-#         wh = W * H  # Precompute to avoid repeated calculation
-
-#         # Loop through bins to compute values and accumulate in voxel grid
-#         for i_bin in range(C):
-#             values = t * self.value_layer.forward(t - i_bin / (C - 1))
-#             # values = t * self.value_layer.trilinear_kernel((t - i_bin / (C - 1)), 5)
-
-#             # Calculate final index for this bin
-#             idx = idx_before_bins + W * H * i_bin
-
-#             # Ensure idx is within bounds
-#             if (idx < 0).any() or (idx >= num_voxels).any():
-#                 print(f"Out-of-bounds indices detected: min={idx.min()}, max={idx.max()}, expected range=[0, {num_voxels-1}]")
-#                 idx = idx.clamp(0, num_voxels - 1)  # Clamp values within bounds
-
-#             # Accumulate values in the voxel grid
-#             # vox.put_(idx.long(), values, accumulate=True)
-#             vox.scatter_add_(0, idx.long(), values)
-
-#         vox = vox.view(-1, 2, C, H, W)
-#         vox = torch.cat([vox[:, 0, ...], vox[:, 1, ...]], 1)
-
-#         return vox
-
-# class EROS(nn.Module):
-#     def  __init__(self, inp_chn, width, height, batch_size) -> None:
-#         super(EROS, self).__init__()
-
-#         self.quantization_layer = QuantizationLayer(
-#             dim=(inp_chn, height, width),
-#             mlp_layers=[1, 30, 30, 1],  # test and change if necessary
-#             activation=nn.LeakyReLU(negative_slope=0.1),
-#             batch_size=batch_size
-#         )
-#         self.width = width
-#         self.height = height
-        
-#     def forward(self, events_list, device):
-#         # events_list = []
-#         # for i, event_batch in enumerate(events):
-#         #     valid_mask = ~(event_batch == -10).all(dim=1) # remove invalid events
-#         #     event_batch = event_batch[valid_mask]
-#         #     events_list.append(event_batch)
-        
-#         quantized_events = self.quantization_layer(events_list, device)
-
-#         # visualize_temporal_bins(quantized_events[0], '/CT/EventEgo3Dv2/work/EventEgo3Dv2/visualizations/test/28')
-
-#         out = quantized_events
-#         old_min, old_max, new_min, new_max = out.min(), out.max(), 0, 1
-#         out = (out - old_min) * (new_max - new_min) / (old_max - old_min) + new_min
-
-#         return out
+from .learnable_kf import LearnableKalmanFilter
 
 
 class EgoHPE(nn.Module):
@@ -223,6 +43,13 @@ class EgoHPE(nn.Module):
 
         self.batch_size = batch_size
 
+        self.kalman_filter = LearnableKalmanFilter(
+            state_dim=16*3,
+            batch_size=self.batch_size,
+            measurement_var=1e-2,
+            process_var=1e-3
+        )
+
         # self.EROS = EROS(inp_chn=self.num_bins, height=self.height, width=self.width, batch_size=self.batch_size)
 
 
@@ -247,95 +74,9 @@ class EgoHPE(nn.Module):
         re_poses = []
         poses_old = []
 
-        # ----------working code --------------------------------------------------
-        state_vector_dim = 16 * 3
-        measurement_vector_dim = 16 * 3 
-        dim = 16 * 3
-        dt = 1/1000.0
-        measurement_var = 1e-2 # work pretty well (R)
-        process_var = 1e-3  # work pretty well (Q)
 
-        # measurement_var = 5e-3
-        # process_var = 5e-4
+        x = event_augmentation_v2(self, x, augmentation_data)
 
-        # measurement_var = 5e-3
-        # process_var = 1e-4
-
-
-
-        kf = KalmanFilter(dim_x=state_vector_dim, dim_z=measurement_vector_dim)
-
-        kf.F = np.eye(dim) # State transition matrix: identity since state update is additive
-        kf.B = np.eye(dim) # Control transition matrix: identity to map the delta (u) directly to state
-        kf.H = np.eye(dim) # Measurement function: identity since we directly measure joint positions
-        
-        
-        # kf.Q = np.eye(dim) * process_var # Process noise covariance matrix: uncertainty in the prediction (delta)
-        
-        # measurement_var = 1e-4 # In Testing
-        # measurement_var = 3.0045 # variance calculate on test set without kf only abs poses
-
-        kf.R = np.eye(dim) * measurement_var # Measure
-
-        # kf.R *= 5
-        # kf.Q = Q_discrete_white_noise(1, dt, .1, block_size=dim)
-        # process_var = 1e-4  # low accuracy, more stability
-        # process_var = 1e-5  # IN testing
-        # process_var = 1e-1  # IN testing
-
-        kf.Q = np.eye(48) * process_var
-
-
-        # ---------------------------------------------------------------------------------------------------
-
-        # Adding velocities
-
-        # num_joints = 16
-        # pos_dim = num_joints * 3       # 48
-        # state_vector_dim = pos_dim * 2 # 96 (positions + velocities)
-        # measurement_vector_dim = pos_dim  # 48
-        # dt = 1/1000.0
-
-        # kf = KalmanFilter(dim_x=state_vector_dim, dim_z=measurement_vector_dim)
-
-        # I_pos = np.eye(pos_dim)
-        # F = np.block([
-        #     [I_pos, dt * I_pos],
-        #     [np.zeros((pos_dim, pos_dim)), I_pos]
-        # ])
-        # kf.F = F
-
-        # B = np.block([
-        #     [np.zeros((pos_dim, pos_dim))],
-        #     [I_pos]
-        # ])
-        # kf.B = B
-
-        # H = np.hstack([I_pos, np.zeros((pos_dim, pos_dim))])
-        # kf.H = H
-
-        # process_var = 1e-3  # Tuning parameter (for the process noise)
-        # measurement_var = 1e-2  # Tuning parameter (for the measurement noise)
-        # kf.Q = np.eye(state_vector_dim) * process_var
-        # kf.R = np.eye(measurement_vector_dim) * measurement_var
-
-
-
-        # for i in range(T):
-
-        #     # discretize raw events into voxel grid (20 x 192 x 256)
-        #     out = self.EROS(x[i], device)
-        #     event_voxels.append(out)
-
-        
-        # event_voxels = torch.stack(event_voxels)
-
-        # event_voxels_copy = event_voxels.clone()
-
-        # event_voxels = event_augmentation_v2(self, event_voxels, augmentation_data)
-
-        # iterate over temporal steps
-        # import pdb; pdb.set_trace()
         for i in range(T):
 
             out = x[i]
@@ -354,17 +95,18 @@ class EgoHPE(nn.Module):
             
 
             # for ii, o in enumerate(out):
-            #     visualize_temporal_bins(o.detach(), f'/CT/EventEgo3Dv2/work/EventEgo3Dv2/visualizations/opt_augmented/{ii}.png')
-            #     visualize_temporal_bins(out_copy[ii].detach(), f'/CT/EventEgo3Dv2/work/EventEgo3Dv2/visualizations/opt_augmented/og_{ii}.png')
-            #     save_augmented_data(o.detach(), f'/CT/EventEgo3Dv2/work/EventEgo3Dv2/visualizations/opt_augmented/sum_{ii}.png')
-            #     save_augmented_data(out_copy[ii].detach(), f'/CT/EventEgo3Dv2/work/EventEgo3Dv2/visualizations/opt_augmented/sum_og_{ii}.png')
+            # #     visualize_temporal_bins(o.detach(), f'/CT/EventEgo3Dv2/work/EventEgo3Dv2/visualizations/opt_augmented/{ii}.png')
+            # #     visualize_temporal_bins(out_copy[ii].detach(), f'/CT/EventEgo3Dv2/work/EventEgo3Dv2/visualizations/opt_augmented/og_{ii}.png')
+            #     save_augmented_data(x[ii][0].detach(), f'/CT/EventEgo3Dv2/work/EventEgo3Dv2/visualizations/test_kalman/aug/sum_{ii}.png')
+            #     save_augmented_data(old_x[ii][0].detach(), f'/CT/EventEgo3Dv2/work/EventEgo3Dv2/visualizations/test_kalman/og/sum_og_{ii}.png')
+
 
             if i in [0, 5]:
                 first_step = True
             else:
                 first_step = False
 
-            outs, kf = self.event_3d_posenet(out, s5_state, pose, old_pose, kf, first_temporal_step=(i == 0))
+            outs, kf = self.event_3d_posenet(out, s5_state, pose, old_pose, self.kalman_filter, first_temporal_step=(i == 0))
             # outs = self.event_3d_posenet(out, s5_state, pose, first_temporal_step=True)
 
             # re_outs, kf = self.event_3d_posenet(out, re_s5_state, re_pose, kf, first_temporal_step=first_step)

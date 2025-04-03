@@ -299,10 +299,10 @@ def save_augmented_data(data, path):
     # [positive, blank, negative]
     image = np.concatenate([positive_channel, blank_channel, negative_channel], axis=2)
 
-    return image
+    # return image
     
     # Save the image using OpenCV
-    # cv2.imwrite(path, image)
+    cv2.imwrite(path, image)
 
 def save_mask_image(mask, path):
     """
@@ -389,19 +389,11 @@ def event_augmentation(self, event_voxel, temporal_step, augmentation_data):
 
     return event_voxel.cuda()
 
-
-def is_empty(item):
-    if isinstance(item, torch.Tensor):
-        return item.numel() == 0  # True if the tensor has zero elements
-    else:
-        return len(item) == 0     # Works for lists and other sequences
-
 def event_augmentation_v2(self, event_voxel, augmentation_data):
 
     if not augmentation_data:
         return event_voxel
 
-    # if all(is_empty(inner) for inner in augmentation_data['bg_data'][temporal_step]):
     if torch.all(augmentation_data['use_bg'] == False):
         return event_voxel
 
@@ -409,77 +401,137 @@ def event_augmentation_v2(self, event_voxel, augmentation_data):
 
     T, B, C, W, H = bg_mask.shape
 
-    bg_data = augmentation_data['bg_data'].view(-1, W, H, 2)
-    bg_mask = bg_mask.view(-1, 1, W, H)
-    use_bg = augmentation_data['use_bg'].view(-1)
-    event_voxel = event_voxel.view(-1, event_voxel.shape[2], W, H)
+    bg_data = augmentation_data['bg_data']
+    # bg_mask = bg_mask.view(-1, 1, W, H)
+    # use_bg = augmentation_data['use_bg'].view(-1)
+    use_bg = augmentation_data['use_bg']
 
-    temporal_bins = event_voxel.shape[1]
+    # event_voxel = event_voxel.view(-1, event_voxel.shape[2], W, H)
+
+    temporal_bins = event_voxel.shape[2]
 
     kernel = torch.ones((2,2), device=event_voxel.device)
-    dilated_masks = kornia.morphology.dilation(bg_mask, kernel)
-    # dilated_masks = ~dilated_masks.bool() # background without body
-    dilated_masks = dilated_masks[use_bg].expand(-1, temporal_bins//2, -1, -1)
+    filtered_masks = bg_mask[use_bg]
 
-    for i in range(0, dilated_masks.shape[0]):
-        save_mask_image(dilated_masks[i][0], f'/CT/EventEgo3Dv2/work/EventEgo3Dv2/visualizations/opt_augmented/mask_{i}.png')
+    dilated_masks = kornia.morphology.dilation(filtered_masks, kernel).expand(-1, temporal_bins, -1, -1)
+    
+    
+
+    # for i in range(0, dilated_masks.shape[0]):
+    #     save_mask_image(dilated_masks[i][0], f'/CT/EventEgo3Dv2/work/EventEgo3Dv2/visualizations/opt_augmented/mask_{i}.png')
     # save_mask_image(dilated_masks[0][0], f'/CT/EventEgo3Dv2/work/EventEgo3Dv2/visualizations/opt_augmented/mask_1.png')
     # save_mask_image(dilated_masks[10][0], f'/CT/EventEgo3Dv2/work/EventEgo3Dv2/visualizations/opt_augmented/mask_2.png')
 
-    bg_data_0_pool = bg_data[use_bg][:, :, :, 0]  # shape: [num_use_bg, W, H]
-    num_use_bg = bg_data_0_pool.shape[0]
-    temporal_bins_half = temporal_bins // 2  # should be 10
-    # For each sample in the pool, generate random indices for each temporal bin.
-    # This will yield a tensor of shape [num_use_bg, temporal_bins_half] with indices in [0, num_use_bg)
-    rand_indices = torch.randint(0, num_use_bg, (num_use_bg, temporal_bins_half), device=event_voxel.device)
-    # Use list comprehension to create a new tensor that assigns, for each sample,
-    # a randomly chosen background image (from the pool) for every temporal bin.
-    bg_data_0_rand = torch.stack([bg_data_0_pool[rand_indices[i]] for i in range(num_use_bg)], dim=0)
-    # bg_data_0_rand now has shape [num_use_bg, temporal_bins_half, W, H]
-
-    # ------------------------------
-    # For polarity 1 (if needed, similar random assignment):
-    bg_data_1_pool = bg_data[use_bg][:, :, :, 1]  # shape: [num_use_bg, W, H]
-    rand_indices_1 = torch.randint(0, num_use_bg, (num_use_bg, temporal_bins_half), device=event_voxel.device)
-    bg_data_1_rand = torch.stack([bg_data_1_pool[rand_indices_1[i]] for i in range(num_use_bg)], dim=0)
-    # bg_data_1_rand now has shape [num_use_bg, temporal_bins_half, W, H]
-
-    # ------------------------------
-    # Now update the event_voxel for the first half (polarity 0) using the randomly sampled backgrounds.
-    event_voxel[use_bg, 0:temporal_bins_half, :, :] = (
-        event_voxel[use_bg, 0:temporal_bins_half, :, :] * dilated_masks +
-        bg_data_0_rand * (1 - dilated_masks)
-    ).float()
-
-    # And update the second half (polarity 1) similarly.
-    event_voxel[use_bg, temporal_bins_half:temporal_bins, :, :] = (
-        event_voxel[use_bg, temporal_bins_half:temporal_bins, :, :] * dilated_masks +
-        bg_data_1_rand * (1 - dilated_masks)
-    ).float()
-
-    # bg_data_0_polarity = bg_data[use_bg][:, :, :, 0].unsqueeze(1).expand(-1, temporal_bins//2, -1, -1)
-    # bg_data_1_polarity = bg_data[use_bg][:, :, :, 1].unsqueeze(1).expand(-1, temporal_bins//2, -1, -1)
-
-
-    # event_voxel[use_bg, 0:(event_voxel.shape[1]//2), :, :] = ((event_voxel[use_bg, 0:(event_voxel.shape[1]//2), :, :] * (dilated_masks)) + (bg_data_0_polarity * (1 - dilated_masks))).float()
-    # event_voxel[use_bg, (event_voxel.shape[1]//2):event_voxel.shape[1], :, :] = ((event_voxel[use_bg, (event_voxel.shape[1]//2):event_voxel.shape[1], :, :] * (dilated_masks)) + (bg_data_1_polarity * (1 - dilated_masks))).float()
+    event_voxel[use_bg] = event_voxel[use_bg] * dilated_masks + bg_data[use_bg] * (1 - dilated_masks)
 
     # Random noise augmentation
     target_height, target_width = event_voxel.shape[-2:]
-    add_mask = (torch.rand(event_voxel.shape[0], temporal_bins, target_height, target_width, device=event_voxel.device) > 0.9995).float()
+    # add_mask = (torch.rand(event_voxel.shape[0], event_voxel.shape[1], temporal_bins, target_height, target_width, device=event_voxel.device) > 0.9995).float()
 
     
     # Noise addition
-    event_voxel[use_bg, :, :, :] = event_voxel[use_bg, :, :, :] + add_mask[use_bg, :, :, :]
+    # event_voxel[use_bg, :, :, :] = event_voxel[use_bg, :, :, :] + add_mask[use_bg, :, :, :]
+    # event_voxel[use_bg] = event_voxel[use_bg] + add_mask[use_bg]
     
     # Random dropout
     # if np.random.rand() > 0.5:
     #     dropout_rate = np.random.rand() * 0.1
     #     event_voxel = random_dropout(event_voxel, dropout_rate)
     
-    event_voxel = event_voxel.view(T, B, temporal_bins, W, H)
+    # event_voxel = event_voxel.view(T, B, temporal_bins, W, H)
 
     return event_voxel
+
+def is_empty(item):
+    if isinstance(item, torch.Tensor):
+        return item.numel() == 0  # True if the tensor has zero elements
+    else:
+        return len(item) == 0     # Works for lists and other sequences
+
+# def event_augmentation_v2(self, event_voxel, augmentation_data):
+
+#     if not augmentation_data:
+#         return event_voxel
+
+#     # if all(is_empty(inner) for inner in augmentation_data['bg_data'][temporal_step]):
+#     if torch.all(augmentation_data['use_bg'] == False):
+#         return event_voxel
+
+#     bg_mask = augmentation_data['bg_mask']
+
+#     T, B, C, W, H = bg_mask.shape
+
+#     bg_data = augmentation_data['bg_data'].view(-1, W, H, 2)
+#     bg_mask = bg_mask.view(-1, 1, W, H)
+#     use_bg = augmentation_data['use_bg'].view(-1)
+#     event_voxel = event_voxel.view(-1, event_voxel.shape[2], W, H)
+
+#     temporal_bins = event_voxel.shape[1]
+
+#     kernel = torch.ones((2,2), device=event_voxel.device)
+#     dilated_masks = kornia.morphology.dilation(bg_mask, kernel)
+#     # dilated_masks = ~dilated_masks.bool() # background without body
+#     dilated_masks = dilated_masks[use_bg].expand(-1, temporal_bins//2, -1, -1)
+
+#     for i in range(0, dilated_masks.shape[0]):
+#         save_mask_image(dilated_masks[i][0], f'/CT/EventEgo3Dv2/work/EventEgo3Dv2/visualizations/opt_augmented/mask_{i}.png')
+#     # save_mask_image(dilated_masks[0][0], f'/CT/EventEgo3Dv2/work/EventEgo3Dv2/visualizations/opt_augmented/mask_1.png')
+#     # save_mask_image(dilated_masks[10][0], f'/CT/EventEgo3Dv2/work/EventEgo3Dv2/visualizations/opt_augmented/mask_2.png')
+
+#     bg_data_0_pool = bg_data[use_bg][:, :, :, 0]  # shape: [num_use_bg, W, H]
+#     num_use_bg = bg_data_0_pool.shape[0]
+#     temporal_bins_half = temporal_bins // 2  # should be 10
+#     # For each sample in the pool, generate random indices for each temporal bin.
+#     # This will yield a tensor of shape [num_use_bg, temporal_bins_half] with indices in [0, num_use_bg)
+#     rand_indices = torch.randint(0, num_use_bg, (num_use_bg, temporal_bins_half), device=event_voxel.device)
+#     # Use list comprehension to create a new tensor that assigns, for each sample,
+#     # a randomly chosen background image (from the pool) for every temporal bin.
+#     bg_data_0_rand = torch.stack([bg_data_0_pool[rand_indices[i]] for i in range(num_use_bg)], dim=0)
+#     # bg_data_0_rand now has shape [num_use_bg, temporal_bins_half, W, H]
+
+#     # ------------------------------
+#     # For polarity 1 (if needed, similar random assignment):
+#     bg_data_1_pool = bg_data[use_bg][:, :, :, 1]  # shape: [num_use_bg, W, H]
+#     rand_indices_1 = torch.randint(0, num_use_bg, (num_use_bg, temporal_bins_half), device=event_voxel.device)
+#     bg_data_1_rand = torch.stack([bg_data_1_pool[rand_indices_1[i]] for i in range(num_use_bg)], dim=0)
+#     # bg_data_1_rand now has shape [num_use_bg, temporal_bins_half, W, H]
+
+#     # ------------------------------
+#     # Now update the event_voxel for the first half (polarity 0) using the randomly sampled backgrounds.
+#     event_voxel[use_bg, 0:temporal_bins_half, :, :] = (
+#         event_voxel[use_bg, 0:temporal_bins_half, :, :] * dilated_masks +
+#         bg_data_0_rand * (1 - dilated_masks)
+#     ).float()
+
+#     # And update the second half (polarity 1) similarly.
+#     event_voxel[use_bg, temporal_bins_half:temporal_bins, :, :] = (
+#         event_voxel[use_bg, temporal_bins_half:temporal_bins, :, :] * dilated_masks +
+#         bg_data_1_rand * (1 - dilated_masks)
+#     ).float()
+
+#     # bg_data_0_polarity = bg_data[use_bg][:, :, :, 0].unsqueeze(1).expand(-1, temporal_bins//2, -1, -1)
+#     # bg_data_1_polarity = bg_data[use_bg][:, :, :, 1].unsqueeze(1).expand(-1, temporal_bins//2, -1, -1)
+
+
+#     # event_voxel[use_bg, 0:(event_voxel.shape[1]//2), :, :] = ((event_voxel[use_bg, 0:(event_voxel.shape[1]//2), :, :] * (dilated_masks)) + (bg_data_0_polarity * (1 - dilated_masks))).float()
+#     # event_voxel[use_bg, (event_voxel.shape[1]//2):event_voxel.shape[1], :, :] = ((event_voxel[use_bg, (event_voxel.shape[1]//2):event_voxel.shape[1], :, :] * (dilated_masks)) + (bg_data_1_polarity * (1 - dilated_masks))).float()
+
+#     # Random noise augmentation
+#     target_height, target_width = event_voxel.shape[-2:]
+#     add_mask = (torch.rand(event_voxel.shape[0], temporal_bins, target_height, target_width, device=event_voxel.device) > 0.9995).float()
+
+    
+#     # Noise addition
+#     event_voxel[use_bg, :, :, :] = event_voxel[use_bg, :, :, :] + add_mask[use_bg, :, :, :]
+    
+#     # Random dropout
+#     # if np.random.rand() > 0.5:
+#     #     dropout_rate = np.random.rand() * 0.1
+#     #     event_voxel = random_dropout(event_voxel, dropout_rate)
+    
+#     event_voxel = event_voxel.view(T, B, temporal_bins, W, H)
+
+#     return event_voxel
 
 
 

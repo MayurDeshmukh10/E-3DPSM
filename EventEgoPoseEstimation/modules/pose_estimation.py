@@ -46,7 +46,7 @@ from EventEgoPoseEstimation.core.evaluate import accuracy, accuracy_with_vis, ac
 
 from EventEgoPoseEstimation.core.kalman_filter import apply_kalman_filtering
 
-from EventEgoPoseEstimation.core.loss import SegmentationLoss, BoneLengthLoss, JointMSELoss, HeatMapJointsMSELoss, BoneOrientationLoss
+from EventEgoPoseEstimation.core.loss import SegmentationLoss, BoneLengthLoss, JointMSELoss, HeatMapJointsMSELoss, BoneOrientationLoss, BoneLoss
 
 from EventEgoPoseEstimation.utils.vis import save_pose_images, save_debug_images, save_debug_3d_joints, save_debug_segmenation, save_debug_eros, generate_skeleton_image, dump_sketelon_image, drift_plot
 
@@ -69,87 +69,6 @@ import psutil
 
 from filterpy.kalman import KalmanFilter
 from filterpy.common import Q_discrete_white_noise
-
-
-# def apply_kf_to_sequence(abs_seq, dt=1/1000., Q_scale=3.0, R_scale=1.0):
-#     """
-#     Apply a Kalman filter to a single sequence of absolute poses.
-    
-#     Parameters:
-#       abs_seq: numpy array of shape [T, J, 3] (absolute poses over T timesteps)
-#       dt: time step (s)
-#       Q_scale: process noise variance scale
-#       R_scale: measurement noise variance scale
-      
-#     Returns:
-#       filtered_seq: numpy array of shape [T, J, 3] with filtered poses.
-#     """
-#     T, J, _ = abs_seq.shape
-#     d = J * 3  # measurement dimension
-#     # Initialize Kalman filter with state dimension 2*d (position and velocity) and measurement dimension d.
-#     kf = KalmanFilter(dim_x=2*d, dim_z=d)
-    
-#     # Initial state: positions from the first measurement and zero velocities.
-#     kf.x = np.hstack([abs_seq[0].reshape(-1), np.zeros(d)])
-    
-#     # Construct state transition matrix F.
-#     F = np.zeros((2*d, 2*d))
-#     # For each measurement component, update: pos[t] = pos[t-1] + dt * vel[t-1]
-#     for i in range(d):
-#         F[i, i] = 1.0
-#         F[i, i+d] = dt
-#     for i in range(d):
-#         F[i+d, i+d] = 1.0
-#     kf.F = F
-
-#     # Measurement matrix H: we observe only the position components.
-#     H = np.zeros((d, 2*d))
-#     for i in range(d):
-#         H[i, i] = 1.0
-#     kf.H = H
-
-#     # Set measurement noise covariance.
-#     kf.R *= R_scale
-#     # Set process noise covariance using a white-noise acceleration model.
-#     kf.Q = Q_discrete_white_noise(dim=2, dt=dt, var=Q_scale, block_size=d)
-
-#     # Allocate space for filtered sequence.
-#     filtered_seq = np.zeros((T, d))
-#     filtered_seq[0] = abs_seq[0].reshape(-1)
-    
-#     # Run filter for each timestep.
-#     for t in range(1, T):
-#         kf.predict()
-#         # Update with the current measurement (flattened absolute pose)
-#         kf.update(abs_seq[t].reshape(-1))
-#         filtered_seq[t] = kf.x[:d]  # take only the position part of the state
-        
-#     # Reshape filtered output back to [T, J, 3]
-#     filtered_seq = filtered_seq.reshape(T, J, 3)
-#     return filtered_seq
-
-
-
-# def apply_kf_to_sequence(abs_seq, dt=1/1000., Q_scale=3.0, R_scale=1.0):
-#     state_vector_dim = 16 * 3
-#     measurement_vector_dim = 16 * 3 
-
-#     kf = KalmanFilter(dim_x=state_vector_dim, dim_z=measurement_vector_dim)
-
-#     kf.x = abs_poses[0].reshape(-1)
-    
-#     # kf.P = np.eye(dim) * 1.0 # State covariance matrix: initial uncertainty in the state
-#     kf.F = np.eye(dim) # State transition matrix: identity since state update is additive
-#     kf.B = np.eye(dim) # Control transition matrix: identity to map the delta (u) directly to state
-#     kf.H = np.eye(dim) # Measurement function: identity since we directly measure joint positions
-    
-    
-#     kf.Q = np.eye(dim) * process_var # Process noise covariance matrix: uncertainty in the prediction (delta)
-    # kf.R = np.eye(dim) * measurement_var # Measurement noise covariance matrix: uncertainty in the absolute pose measurement
-
-
-
-
 
 class EventEgoPoseEstimation(LightningModule):
 
@@ -220,7 +139,8 @@ class EventEgoPoseEstimation(LightningModule):
             'j2d': JointMSELoss(use_target_weight=True).cuda(),
             'seg': SegmentationLoss().cuda(),
             'bone_length': BoneLengthLoss(use_target_weight=True).cuda(),
-            'bone_orientations': BoneOrientationLoss(use_target_weight=False).cuda() 
+            'bone_orientations': BoneOrientationLoss(use_target_weight=False).cuda(),
+            'bone_loss': BoneLoss().cuda()
         }
 
         # performance metrics
@@ -234,7 +154,7 @@ class EventEgoPoseEstimation(LightningModule):
         self.j2d_losses = AverageMeter()
         self.heatmap_losses = AverageMeter()
         self.bone_length_losses = AverageMeter()
-        self.bone_orientation_losses = AverageMeter()
+        self.bone_angle_losses = AverageMeter()
         self.losses = AverageMeter()
         self.acc = AverageMeter()
 
@@ -254,7 +174,7 @@ class EventEgoPoseEstimation(LightningModule):
 
         # loss weights
         self.wgt_bone_length = loss_weights['bone_length']
-        self.wgt_bone_orientations = loss_weights['bone_orientation']
+        self.wgt_bone_angle = loss_weights['bone_angle']
         self.wgt_j3d = loss_weights['j3d']
         self.wgt_j2d = loss_weights['j2d']
         self.wgt_seg = loss_weights['seg']
@@ -285,14 +205,27 @@ class EventEgoPoseEstimation(LightningModule):
                 logger.info("Training type: Pretrain")
                 
                 if self.use_bg_augmentation:
-                    pretrain_dataset = AugmentedEgoEvent(cfg, EgoEvent(cfg, temporal_bins=self.temporal_bins, split='train'), split='train', temporal_bins=self.temporal_bins)
+                    pretrain_dataset = AugmentedEgoEvent(cfg, 
+                                        EgoEvent(cfg, self.syn_preprocessed_input_path, self.syn_dataset_root_path, temporal_bins=self.temporal_bins, split='train'), 
+                                        bg_data_root=self.bg_dataset_root_path, 
+                                        bg_preprocessed_root=self.bg_preprocessed_input_path,
+                                        split='train',
+                                        temporal_bins=self.temporal_bins)
                 else:
                     pretrain_dataset = EgoEvent(cfg, self.syn_preprocessed_input_path, self.syn_dataset_root_path, temporal_bins=self.temporal_bins, split='train')
 
                 # cfg.DATASET.TYPE = 'Synthetic'
                 # cfg.DATASET.SYN_ROOT = cfg.DATASET.SYN_TEST_ROOT 
                 # TODO: change test to val again
-                self.eval_dataset = TemoralWrapper(EgoEvent(cfg, self.syn_preprocessed_input_path, self.syn_test_dataset_root_path, temporal_bins=self.temporal_bins, split='val'), self.temporal_steps, split='val', sample_step=self.sample_step)
+                eval_dataset = AugmentedEgoEvent(
+                                    cfg, 
+                                    EgoEvent(cfg, self.syn_preprocessed_input_path, self.syn_test_dataset_root_path, temporal_bins=self.temporal_bins, split='test'), 
+                                    bg_data_root=self.bg_dataset_root_path, 
+                                    bg_preprocessed_root=self.bg_preprocessed_input_path,
+                                    split='test', 
+                                    temporal_bins=self.temporal_bins)
+                
+                self.eval_dataset = TemoralWrapper(eval_dataset, self.temporal_steps, split='test', sample_step=self.sample_step)
                 self.train_dataset = TemoralWrapper(pretrain_dataset, self.temporal_steps, split='train', sample_step=self.sample_step)
 
             elif self.training_type == 'finetune':
@@ -377,8 +310,9 @@ class EventEgoPoseEstimation(LightningModule):
     def val_dataloader(self):
         dataloader =  torch.utils.data.DataLoader(
             self.eval_dataset,
-            batch_size=self.batch_size,
+            batch_size=1,
             # collate_fn=collate_variable_size,
+            collate_fn=lambda x: x[0],
             num_workers=self.workers,
             pin_memory=True,
             drop_last=True
@@ -406,98 +340,87 @@ class EventEgoPoseEstimation(LightningModule):
         end = time.time()
         loss = torch.tensor(0.1, requires_grad=True, device=self.device)
 
-        try:
-            inps, outputs, gt_hms, gt_poses, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index, pose_filename = compute_fn_v3(self.model, batch)
+        self.model.kalman_filter.reset()
 
-            meta = {'j3d': gt_poses, 'j2d': gt_j2d, 'vis_j2d': vis_j2d, 'vis_j3d': vis_j3d}
-            
-            pred_poses_2d = camera_to_j2d_batch(outputs['abs_poses'].view(-1, 16, 3), self.image_size, self.ocam_model)
-            gt_poses_2d = camera_to_j2d_batch(gt_poses.view(-1, 16, 3), self.image_size, self.ocam_model)
-            pred_poses_2d = pred_poses_2d.reshape(outputs['abs_poses'].shape[0], outputs['abs_poses'].shape[1], 16, 2)
-            gt_poses_2d = gt_poses_2d.reshape(gt_poses.shape[0], gt_poses.shape[1], 16, 2)
+        inps, outputs, gt_hms, gt_poses, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index, pose_filename, vis_ja = compute_fn_v3(self.model, batch)
 
-
-            gt_poses_temp = gt_poses
-            gt_poses = gt_poses  * 1000 # scale to mm
-            pred_poses = outputs['abs_poses'] * 1000 # scale to mm
-            pred_delta_poses = outputs['delta_poses'] * 1000 # scale to mm
-            pred_seg = outputs['seg']
-            valid_seg = valid_seg.view(self.temporal_steps, self.batch_size, 1, 1, 1)
-            gt_delta_poses = gt_poses[1:, :, :, :] - gt_poses[:-1, :, :, :]
-            # pred_heatmaps = outputs['heatmaps']
-            # self.s5_states = outputs['s5_states']
+        meta = {'j3d': gt_poses, 'j2d': gt_j2d, 'vis_j2d': vis_j2d, 'vis_j3d': vis_j3d}
+        
+        pred_poses_2d = camera_to_j2d_batch(outputs['abs_poses'].view(-1, 16, 3), self.image_size, self.ocam_model)
+        gt_poses_2d = camera_to_j2d_batch(gt_poses.view(-1, 16, 3), self.image_size, self.ocam_model)
+        pred_poses_2d = pred_poses_2d.reshape(outputs['abs_poses'].shape[0], outputs['abs_poses'].shape[1], 16, 2)
+        gt_poses_2d = gt_poses_2d.reshape(gt_poses.shape[0], gt_poses.shape[1], 16, 2)
 
 
-            # for i in range(gt_poses.shape[0]):
-                # dump_sketelon_image(gt_poses_temp[i][0], gt_poses_temp[i][0], f"./visualizations/sanity/{i}_gt_j3d.png")
-                # save_pose_images(pred_poses_2d.detach().cpu(), gt_poses_2d.detach().cpu(), '/CT/EventEgo3Dv2/work/EventEgo3Dv2/visualizations/sanity', mask_images=gt_seg.detach().cpu())
+        gt_poses_temp = gt_poses
+        gt_poses = gt_poses  * 1000 # scale to mm
+        pred_poses = outputs['abs_poses'] * 1000 # scale to mm
+        pred_delta_poses = outputs['delta_poses'] * 1000 # scale to mm
+        pred_seg = outputs['seg']
+        valid_seg = valid_seg.view(self.temporal_steps, self.batch_size, 1, 1, 1)
+        gt_delta_poses = gt_poses[1:, :, :, :] - gt_poses[:-1, :, :, :]
+        # pred_heatmaps = outputs['heatmaps']
+        # self.s5_states = outputs['s5_states']
 
-            loss_j3d_delta = self.criterions['delta_j3d'](pred_delta_poses, gt_delta_poses, vis_j3d[1:, :] * self.wgt_j3d_delta)
-            loss_seg = self.criterions['seg'](pred_seg, gt_seg, valid_seg * self.wgt_seg)
-            loss_j3d = self.criterions['j3d'](pred_poses, gt_poses, vis_j3d * self.wgt_j3d)
-            loss_j2d = self.criterions['j2d'](pred_poses_2d, gt_poses_2d, vis_j2d * self.wgt_j2d)
-            # loss_heatmaps = self.criterions['heatmap'](pred_heatmaps, gt_hms, vis_j2d * self.wgt_heatmap)
-            loss_bone_length = self.criterions['bone_length'](pred_poses, gt_poses, vis_j3d * self.wgt_bone_length)
-            # loss_bone_orientations = self.criterions['bone_orientations'](pred_poses, gt_poses)
 
-            loss = loss_j3d + loss_j2d + loss_seg + loss_bone_length + loss_j3d_delta
+        # for i in range(gt_poses.shape[0]):
+            # dump_sketelon_image(gt_poses_temp[i][0], gt_poses_temp[i][0], f"./visualizations/sanity/{i}_gt_j3d.png")
+            # save_pose_images(pred_poses_2d.detach().cpu(), gt_poses_2d.detach().cpu(), '/CT/EventEgo3Dv2/work/EventEgo3Dv2/visualizations/sanity', mask_images=gt_seg.detach().cpu())
 
-            self._update_metrics(loss, loss_j3d_delta, loss_seg, loss_j3d, loss_j2d, 
-                           loss_bone_length, gt_poses, pred_poses, valid_j3d, inps)
+        loss_j3d_delta = self.criterions['delta_j3d'](pred_delta_poses, gt_delta_poses, vis_j3d[1:, :] * self.wgt_j3d_delta)
+        loss_seg = self.criterions['seg'](pred_seg, gt_seg, valid_seg * self.wgt_seg)
+        loss_j3d = self.criterions['j3d'](pred_poses, gt_poses, vis_j3d * self.wgt_j3d)
+        loss_j2d = self.criterions['j2d'](pred_poses_2d, gt_poses_2d, vis_j2d * self.wgt_j2d)
+        # loss_heatmaps = self.criterions['heatmap'](pred_heatmaps, gt_hms, vis_j2d * self.wgt_heatmap)
+        loss_bone_length = self.criterions['bone_length'](pred_poses, gt_poses, vis_j3d * self.wgt_bone_length)
+        loss_angle = self.criterions['bone_loss'](pred_poses, gt_poses, vis_ja * self.wgt_bone_angle, vis_ja * self.wgt_bone_length)
 
-            end = time.time()
+        loss = loss_j3d + loss_j2d + loss_seg + loss_bone_length + loss_j3d_delta + loss_angle
 
-            # self._log_metrics()
-            # self._log_training_progress(batch_idx, end)
-            # # print("Input shape ", inp.shape)
-            # self._log_memory_stats()
-            
-            if batch_idx % cfg.PRINT_FREQ == 0:
-                self._log_metrics()
-                self._log_training_progress(batch_idx, end)
-                self._log_memory_stats()
+        self._update_metrics(loss, loss_angle, loss_j3d_delta, loss_seg, loss_j3d, loss_j2d, 
+                        loss_bone_length, gt_poses, pred_poses, valid_j3d, inps)
 
-                # if int(self.batch_size) < 4:
-                #     n_images = int(self.batch_size)
-                # else:
-                #     n_images = 4
+        end = time.time()
 
-                # if batch_idx % (cfg.PRINT_FREQ * 4) == 0:
-                #     try:
-                #         inp = inp.detach().cpu().numpy()
-                #         gt_poses = gt_poses.detach()
-                #         pred_poses = pred_poses.detach()
-                #         gt_seg = gt_seg
-                #         # pred_seg_detached = pred_seg_detached
-                #         # pred_eros_image = pred_eros_image
-                #         # representation_image = representation_image
+        # self._log_metrics()
+        # self._log_training_progress(batch_idx, end)
+        # # print("Input shape ", inp.shape)
+        # self._log_memory_stats()
+        
+        if batch_idx % cfg.PRINT_FREQ == 0:
+            self._log_metrics()
+            self._log_training_progress(batch_idx, end)
+            self._log_memory_stats()
 
-                #         # save_debug_images(self, cfg, representation_image, meta, gt_hms, pred_hms, 'train', self.global_steps, n_images=n_images)
-                #         save_debug_3d_joints(self, cfg, inp, meta, gt_poses, pred_poses, 'train', global_step=self.global_steps)
-                #         # save_debug_segmenation(self, cfg, inp, meta, gt_seg, pred_seg_detached, 'train', global_step=self.global_steps)
-                #         # save_debug_eros(self, cfg, representation_image, meta, pred_eros_image, 'train', global_step=self.global_steps)
-                #     except Exception as e:
-                #         logger.error("Error in saving debug data : {}".format(e))
+            # if int(self.batch_size) < 4:
+            #     n_images = int(self.batch_size)
+            # else:
+            #     n_images = 4
 
-        except RuntimeError as e:
-            if "out of memory" in str(e):
+            # if batch_idx % (cfg.PRINT_FREQ * 4) == 0:
+            #     try:
+            #         inp = inp.detach().cpu().numpy()
+            #         gt_poses = gt_poses.detach()
+            #         pred_poses = pred_poses.detach()
+            #         gt_seg = gt_seg
+            #         # pred_seg_detached = pred_seg_detached
+            #         # pred_eros_image = pred_eros_image
+            #         # representation_image = representation_image
 
-                # # Clear cache and log the OOM event
-                # if torch.cuda.is_available():
-                #     torch.cuda.empty_cache()
-                logger.warning(f"OOM error in batch {batch_idx}. Skipping batch. Error: {str(e)}")
+            #         # save_debug_images(self, cfg, representation_image, meta, gt_hms, pred_hms, 'train', self.global_steps, n_images=n_images)
+            #         save_debug_3d_joints(self, cfg, inp, meta, gt_poses, pred_poses, 'train', global_step=self.global_steps)
+            #         # save_debug_segmenation(self, cfg, inp, meta, gt_seg, pred_seg_detached, 'train', global_step=self.global_steps)
+            #         # save_debug_eros(self, cfg, representation_image, meta, pred_eros_image, 'train', global_step=self.global_steps)
+            #     except Exception as e:
+            #         logger.error("Error in saving debug data : {}".format(e))
 
-                dummy_loss = sum([p.sum() * 0.0 for p in self.model.parameters()])
-                return dummy_loss
-                
-            else:
-                logger.error(f"Error in batch {batch_idx}: {str(e)}")
-                raise e
         
         return loss
 
     def eval_step(self, batch, batch_idx, prefix, vis=False):
         self.model.eval()
+
+        self.model.kalman_filter.reset()
 
         if vis == False:
 
@@ -517,7 +440,7 @@ class EventEgoPoseEstimation(LightningModule):
             batch_d = torch.utils.data._utils.collate.default_collate([data_batch])
 
 
-            inps, outputs, gt_hms, gt_abs_poses_og, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index, pose_filename = compute_fn_v4(self.model, batch_d)
+            inps, outputs, gt_hms, gt_abs_poses_og, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index, pose_filename, vis_ja = compute_fn_v4(self.model, batch_d)
             
             pred_abs_poses_t = outputs['abs_poses'] * 1000 # scale to mm  (previous pose + current delta + kalman filtering)
             # pred_abs_poses_t = outputs['poses_old'] * 1000 # previous pose + current delta + no kalman filtering
@@ -672,10 +595,10 @@ class EventEgoPoseEstimation(LightningModule):
             self.batch_time.update(time.time() - start_time)
             end = time.time()
 
-            self.all_preds_j3d.append(pred_abs_poses.detach().cpu())
-            self.all_gt_j3ds.append(gt_abs_poses.detach().cpu())
-            self.all_vis_j3d.append(valid_j3d.detach().cpu())
-            self.all_frame_indices.append(frame_index.detach().cpu())
+            # self.all_preds_j3d.append(pred_abs_poses.detach().cpu())
+            # self.all_gt_j3ds.append(gt_abs_poses.detach().cpu())
+            # self.all_vis_j3d.append(valid_j3d.detach().cpu())
+            # self.all_frame_indices.append(frame_index.detach().cpu())
 
 
             self.log('val_loss', self.j3d_loss_val.avg, sync_dist=True, batch_size=self.batch_size)
@@ -720,6 +643,7 @@ class EventEgoPoseEstimation(LightningModule):
         # self.log('train_heatmap_loss', self.heatmap_losses.avg)
         self.log('train_bone_length_loss', self.bone_length_losses.avg)
         self.log('train_seg_loss', self.seg_losses.avg)
+        self.log('train_bone_angle_loss', self.bone_angle_losses.avg)
 
         current_lr = self.trainer.optimizers[0].param_groups[0]['lr']
         self.log("learning_rate", current_lr)
@@ -734,7 +658,7 @@ class EventEgoPoseEstimation(LightningModule):
         # logger.info(f"Current reserved memory: {memory_stats['reserved_bytes.all.current'] / (1024 ** 2):.2f} MB")
         logger.info(f"Peak reserved memory: {memory_stats['reserved_bytes.all.peak'] / (1024 ** 2):.2f} MB")
     
-    def _update_metrics(self, loss, loss_j3d_delta, loss_seg, loss_j3d, loss_j2d, 
+    def _update_metrics(self, loss, loss_angle, loss_j3d_delta, loss_seg, loss_j3d, loss_j2d, 
                    loss_bone_length, gt_poses, pred_poses, valid_j3d, inps):
         avg_acc, cnt = accuracy(gt_poses, pred_poses, valid_j3d)
 
@@ -743,6 +667,7 @@ class EventEgoPoseEstimation(LightningModule):
         self.j3d_losses.update(loss_j3d, inps.size(0))
         self.j2d_losses.update(loss_j2d, inps.size(0))
         self.bone_length_losses.update(loss_bone_length, inps.size(0))
+        self.bone_angle_losses.update(loss_angle, inps.size(0))
         self.losses.update(loss, inps.size(0))
         self.acc.update(avg_acc, cnt)
 
@@ -755,6 +680,7 @@ class EventEgoPoseEstimation(LightningModule):
             'SEG_Loss {seg_loss.val:.5f} ({seg_loss.avg:.5f})\t' \
             'J2D_Loss {j2d_loss.val:.5f} ({j2d_loss.avg:.5f})\t' \
             'Bone_Length_Loss {bone_length_loss.val:.5f} ({bone_length_loss.avg:.5f})\t' \
+            'Bone_Angle_Loss {bone_angle_loss.val:.5f} ({bone_angle_loss.avg:.5f})\t' \
             'Loss {loss.val:.5f} ({loss.avg:.5f})\t' \
             'MPJPE {acc.val:.3f} ({acc.avg:.3f})'.format(
                 self.current_epoch, batch_idx, self.trainer.num_training_batches,
@@ -764,6 +690,7 @@ class EventEgoPoseEstimation(LightningModule):
                 seg_loss=self.seg_losses,
                 j2d_loss=self.j2d_losses,
                 bone_length_loss=self.bone_length_losses,
+                bone_angle_loss=self.bone_angle_losses,
                 acc=self.acc
             )
         current_lr = self.trainer.optimizers[0].param_groups[0]['lr']

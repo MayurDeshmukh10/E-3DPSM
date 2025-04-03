@@ -52,6 +52,7 @@ class Joints3DDataset(Dataset):
         j2d = anno['j2d']
         vis_j2d = anno['vis_j2d']
         vis_j3d = anno['vis_j3d']
+        vis_ja = anno['vis_ja']
         valid_seg = float(anno['valid_seg'])
         
         img_h, img_w = segmentation_mask.shape[:2]
@@ -146,6 +147,7 @@ class Joints3DDataset(Dataset):
                 
         vis_j2d = torch.from_numpy(vis_j2d)
         vis_j3d = torch.from_numpy(vis_j3d)
+        vis_ja = torch.from_numpy(vis_ja)
 
         meta = {
             'j2d': j2d,
@@ -153,6 +155,7 @@ class Joints3DDataset(Dataset):
             'vis_j2d': vis_j2d[:, :1],
             'vis_j3d': vis_j2d[:, :1],
             'valid_j3d': vis_j3d[:, :1],
+            'vis_ja': vis_ja[:, :1],
             'frame_index': frame_index,
             'rgb_frame_index': rgb_frame_index,
             'scale_x': sx,
