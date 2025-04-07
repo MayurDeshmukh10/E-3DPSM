@@ -111,21 +111,21 @@ class Event3DPoseNet(nn.Module):
         self.delta_head = JointRegressor(9216 + self.pose_embed_dim, num_joints=self.n_joints)
 
 
-    def forward(self, x, states, previous_pose, previous_pose_old, kalman_filter, first_temporal_step=False):
+    def forward(self, x, prev_5_states, previous_pose, previous_pose_old, kalman_filter, first_temporal_step=False):
         
         H, W = x.shape[-2:]
-        B = x.shape[0]
+        B = x.shape[1]
+        T = x.shape[0]
 
-        feature_maps = {}
+        feature_maps = list()
+        s5_states = dict()
         delta_pose = None
 
-        x_bin = x
+        x = rearrange(x, "L B C H W -> (L B) C H W").contiguous()  # where B' = (L B) is the new batch size
 
-        x = self.conv1(x_bin)
+        x = self.conv1(x)
 
-        feature_maps = []
-
-        for encoder_block in self.encoder_backbone:
+        for stage, encoder_block in enumerate(self.encoder_backbone):
             x = encoder_block(x)
             feature_maps.append(x)
 
@@ -133,22 +133,22 @@ class Event3DPoseNet(nn.Module):
         feature_maps = feature_maps[::-1]
         h_new, w_new = x.shape[-2:]
 
-        if states is None:
+        if prev_5_states is None:
             states = self.s5_block.s5.initial_state(
                 batch_size=B * h_new * w_new
             ).to(x.device)
         else:
             states = rearrange(states, "B C H W -> (B H W) C").contiguous()
 
-        x = rearrange(x, "B C H W -> (B H W) 1 C").contiguous()
-
+        # x = rearrange(x, "B C H W -> (B H W) 1 C").contiguous()
+        x = rearrange(x, "(L B) C H W -> (B H W) L C", L=T).contiguous()
+        
         x, states = self.s5_block(x, states)
 
-        states = states.detach()
-
         x = rearrange(
-            x, "(B H W) 1 C -> B C H W", B=B, H=int(h_new), W=int(w_new)
+                x, "(B H W) L C -> (L B) C H W", B=B, H=int(h_new), W=int(w_new)
         ).contiguous()
+
 
         last_layer_features = x
 
@@ -164,7 +164,7 @@ class Event3DPoseNet(nn.Module):
         # project the segmentation features to the same dimension as the states
         seg_features = self.seg_proj_conv(F.adaptive_avg_pool2d(x, output_size=(6, 8)))
 
-        states = states + seg_features # element-wise addition of the segmentation features
+        # states = states + seg_features # element-wise addition of the segmentation features
 
         seg_f_detached = torch.sigmoid(seg_f.detach().clone())
 
@@ -172,37 +172,59 @@ class Event3DPoseNet(nn.Module):
 
         x = last_layer_features
 
-        x = x.view(B, -1)
+        x = x + seg_features # element-wise addition of the segmentation features
 
-        # --------------working code ----------------------------------
-        if first_temporal_step:
-            current_pose = self.initial_pose_head(x)
-            kalman_filter.initialize(current_pose.reshape(B, -1))
-            abs_pose = current_pose
-            current_pose_old = current_pose
-        else:
-            abs_pose = self.initial_pose_head(x)
-            previous_pose_emb = self.pose_embedding(previous_pose)
-            x = torch.cat([x, previous_pose_emb], dim=1) # [batch_size, 9216 + 64]
-            delta_pose = self.delta_head(x)
+        x = x.view(T, B, -1)
 
-            kalman_filter.predict(u=delta_pose.reshape(B, -1))
-            kalman_filter.update(abs_pose.reshape(B, -1))
-
-            current_pose = kalman_filter.x.reshape(B, 16, 3)
-            
-            current_pose_old = previous_pose_old + delta_pose
+        delta_poses = list()
+        current_poses = list()
+        current_poses_old = list()
+        abs_poses = list()
 
 
-        final_state = states
+        for i in range(T):
+            if i == 0:
+                current_pose = self.initial_pose_head(x[i])
+                kalman_filter.initialize(current_pose.reshape(B, -1))
+                previous_pose = current_pose
+                abs_pose = current_pose
+                current_pose_old = current_pose
+                previous_pose_old = current_pose_old
+            else:
+                abs_pose = self.initial_pose_head(x[i])
+                previous_pose_emb = self.pose_embedding(previous_pose)
+                x_feat = torch.cat([x[i], previous_pose_emb], dim=1) # [batch_size, 9216 + 64]
+                delta_pose = self.delta_head(x_feat)
+
+                kalman_filter.predict(u=delta_pose.reshape(B, -1))
+                kalman_filter.update(abs_pose.reshape(B, -1))
+
+                current_pose = kalman_filter.x.reshape(B, 16, 3)
+                
+                previous_pose = current_pose
+                current_pose_old = previous_pose_old + delta_pose
+                delta_poses.append(delta_pose)
+
+            current_poses.append(current_pose)
+            current_poses_old.append(current_pose_old)
+            abs_poses.append(abs_pose)
+
+
+        seg_out = seg_out.view(T, B, 1, H, W)
+
+        delta_poses = torch.stack(delta_poses, dim=0)
+        current_poses = torch.stack(current_poses, dim=0)
+        current_poses_old = torch.stack(current_poses_old, dim=0)
+        abs_poses = torch.stack(abs_poses, dim=0)
+
+        states = states.detach()
 
         return {
-            'delta_pose': delta_pose,
+            'delta_pose': delta_poses,
             'seg': seg_out,
             'seg_feature': seg_f_detached,
-            's5_state': final_state,
-            'pose': current_pose,
-            'abs_pose': abs_pose,
-            'current_pose_old': current_pose_old
-            # 'heatmaps': hms_out
-        }, kalman_filter
+            's5_state': states,
+            'pose': current_poses,
+            'abs_pose': abs_poses,
+            'current_pose_old': current_poses_old
+        }

@@ -6,4 +6,4 @@ from pytorch_lightning.callbacks.model_checkpoint import ModelCheckpoint
 
 
 if __name__ == "__main__":
-    LightningCLI()
+    LightningCLI(save_config_kwargs={"overwrite": True})

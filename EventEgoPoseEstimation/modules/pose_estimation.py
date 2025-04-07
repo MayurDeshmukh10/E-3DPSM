@@ -44,7 +44,7 @@ from EventEgoPoseEstimation.core.function import compute_fn, _print_name_value, 
 
 from EventEgoPoseEstimation.core.evaluate import accuracy, accuracy_with_vis, accuracy_test, create_concatenated_image
 
-from EventEgoPoseEstimation.core.kalman_filter import apply_kalman_filtering
+# from EventEgoPoseEstimation.core.kalman_filter import apply_kalman_filtering
 
 from EventEgoPoseEstimation.core.loss import SegmentationLoss, BoneLengthLoss, JointMSELoss, HeatMapJointsMSELoss, BoneOrientationLoss, BoneLoss
 
@@ -231,11 +231,28 @@ class EventEgoPoseEstimation(LightningModule):
             elif self.training_type == 'finetune':
                 logger.info("Training type: Finetune")
 
-                finetune_dataset = EgoEvent(cfg, self.real_preprocessed_input_path, self.real_dataset_root_path, temporal_bins=self.temporal_bins, split='train', finetune=True)
+                finetune_dataset = AugmentedEgoEvent(
+                                    cfg,
+                                    EgoEvent(cfg, self.real_preprocessed_input_path, self.real_dataset_root_path, temporal_bins=self.temporal_bins, split='train', finetune=True),
+                                    bg_data_root=self.bg_dataset_root_path, 
+                                    bg_preprocessed_root=self.bg_preprocessed_input_path,
+                                    split='finetune',
+                                    temporal_bins=self.temporal_bins)
+                
+                cfg.DATASET.TYPE = 'Real'
+                eval_dataset = AugmentedEgoEvent(
+                                    cfg,
+                                    EgoEvent(cfg, self.real_preprocessed_input_path, self.real_dataset_root_path, temporal_bins=self.temporal_bins, split='test'),
+                                    bg_data_root=self.bg_dataset_root_path, 
+                                    bg_preprocessed_root=self.bg_preprocessed_input_path,
+                                    split='finetune',
+                                    temporal_bins=self.temporal_bins)
 
-                cfg.DATASET.TYPE = 'Real'    
-                self.eval_dataset = TemoralWrapper(EgoEvent(cfg, self.real_preprocessed_input_path, self.real_dataset_root_path, temporal_bins=self.temporal_bins, split='val'), self.temporal_steps, split='val', sample_step=self.sample_step)
+                self.eval_dataset = TemoralWrapper(eval_dataset, self.temporal_steps, split='test', sample_step=self.sample_step)
                 self.train_dataset = TemoralWrapper(finetune_dataset, self.temporal_steps, split='train', sample_step=self.sample_step)
+
+                # self.eval_dataset = TemoralWrapper(EgoEvent(cfg, self.real_preprocessed_input_path, self.real_dataset_root_path, temporal_bins=self.temporal_bins, split='val'), self.temporal_steps, split='val', sample_step=self.sample_step)
+                # self.train_dataset = TemoralWrapper(finetune_dataset, self.temporal_steps, split='train', sample_step=self.sample_step)
             else:
                 assert False, f"Invalid training type: {self.training_type}"
 
@@ -360,7 +377,9 @@ class EventEgoPoseEstimation(LightningModule):
         valid_seg = valid_seg.view(self.temporal_steps, self.batch_size, 1, 1, 1)
         gt_delta_poses = gt_poses[1:, :, :, :] - gt_poses[:-1, :, :, :]
         # pred_heatmaps = outputs['heatmaps']
-        # self.s5_states = outputs['s5_states']
+        
+        s5_states = outputs['s5_states']
+        s5_states.detach()
 
 
         # for i in range(gt_poses.shape[0]):
@@ -440,7 +459,7 @@ class EventEgoPoseEstimation(LightningModule):
             batch_d = torch.utils.data._utils.collate.default_collate([data_batch])
 
 
-            inps, outputs, gt_hms, gt_abs_poses_og, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index, pose_filename, vis_ja = compute_fn_v4(self.model, batch_d)
+            inps, outputs, gt_hms, gt_abs_poses_og, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index, pose_filename = compute_fn_v4(self.model, batch_d)
             
             pred_abs_poses_t = outputs['abs_poses'] * 1000 # scale to mm  (previous pose + current delta + kalman filtering)
             # pred_abs_poses_t = outputs['poses_old'] * 1000 # previous pose + current delta + no kalman filtering

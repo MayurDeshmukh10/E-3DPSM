@@ -1,0 +1,96 @@
+seed_everything: 42
+
+model:
+  class_path: EventEgoPoseEstimation.modules.EventEgoPoseEstimation
+  init_args:
+    model_cfg:
+      num_joints: 16
+      eros: True
+      input_channel: 2 #36 (works well in vis) #18 #12 #18
+      posenet_input_channel: 2
+      image_size: [256, 192]
+      batch_size: 6 #16 # 9 # individual batch size
+
+    lr: 0.001
+    lr_decay_epochs:
+      - 92 #10
+      - 97 #15
+    
+    loss_weights:
+      bone_length: 0.001
+      bone_angle: 0.001
+      j2d: 0.01
+      j3d: 0.02
+      heatmap: 10
+      delta_j3d: 0.01
+      seg: 0.1
+
+    dataset_type:  synthetic # real
+    training_type: pretrain #finetune #pretrain # finetune
+    use_bg_augmentation: true
+    temporal_steps: 10
+    sample_step: 0 # not used currently
+    batch_size: 6
+    workers: 14
+    tbptt_steps: 50
+    fixed_sequence_length: 100
+
+    dataset:
+      syn_preprocessed_input_path: /scratch/inf0/user/mdeshmuk/EE3D-preprocessed/EE3D-S
+      real_preprocessed_input_path: "/scratch/inf0/user/mdeshmuk/EE3D-preprocessed/EE3D-R" 
+      syn_dataset_root_path: /CT/datasets07/nobackup/EE3D-S
+      syn_test_dataset_root_path: /CT/datasets07/nobackup/EE3D-S-Test
+      real_dataset_root_path: /CT/datasets07/nobackup/EE3D-R/Real_Dataset
+      bg_dataset_root_path: /CT/datasets07/nobackup/EE3D-R/Background_Dataset
+      bg_preprocessed_input_path: /scratch/inf0/user/mdeshmuk/EE3D-preprocessed/EE3D-BG
+
+# ckpt_path: /CT/EventEgo3Dv2/work/EventEgo3Dv2/results/wandb_data/pretraining_dp_attention_kf_0/EventEgo3Dv2/fjhee5ie/checkpoints/epoch=0.ckpt
+
+trainer:
+  accelerator: gpu
+  max_epochs: 80
+  check_val_every_n_epoch: 1
+  devices: 4
+  num_nodes: 2
+  benchmark: false
+  # precision: 16-mixed
+  strategy: ddp_find_unused_parameters_true
+  fast_dev_run: false
+  # limit_train_batches: 2
+  # limit_val_batches: 1500
+  # every_n_train_steps: 200
+#  gradient_clip_val: 5.0
+#  gradient_clip_algorithm: norm
+  callbacks:
+    - class_path: pytorch_lightning.callbacks.TQDMProgressBar
+      init_args:
+        refresh_rate: 50
+    - class_path: pytorch_lightning.callbacks.ModelCheckpoint
+      init_args:
+        every_n_epochs: 1
+        save_top_k: -1
+        filename: "{epoch}"
+        save_last: True
+        dirpath: ./results/wandb_data/pre_att_lkf_lnes
+    # - class_path: EventEgoPoseEstimation.modules.pose_estimation.EvaluateCallback
+    # - class_path: pytorch_lightning.callbacks.ModelCheckpoint
+    #   init_args:
+    #     every_n_train_steps: 10000
+    #     save_top_k: -1
+    #     filename: "epoch_{epoch:02d}_step_{step}"
+    #     # dirpath: "./results/"
+    #     save_last: True
+    # - class_path: pytorch_lightning.callbacks.LearningRateFinder
+
+  logger:
+  - class_path: pytorch_lightning.loggers.WandbLogger
+    init_args:
+      name: pre_att_lkf_lnes # Experiment name on wandb
+      project: EventEgo3Dv2  # Replace with your project name on wandb
+      save_dir: ./results/wandb_data/pre_att_lkf_lnes  # Local directory to save wandb logs
+      log_model: true  # Log the model checkpoints to wandb
+      offline: false  # Set to true if you want to log offline and sync later
+  - class_path: pytorch_lightning.loggers.TensorBoardLogger
+    init_args:
+      save_dir: ./results/
+      name: pre_att_lkf_lnes  # TensorBoard experiment name

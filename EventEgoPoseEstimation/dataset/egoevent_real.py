@@ -33,7 +33,7 @@ class RealEventStream(Dataset):
 
         self.total_frames = meta['total_frames']
         
-        self.stream_path = self.processed_input_path / 'event_tensor.hdf5'
+        self.stream_path = self.processed_input_path / 'lnes.hdf5'
 
         self.fin = None 
 
@@ -83,7 +83,8 @@ class RealEventStream(Dataset):
         data_batch = self.fin[str(idx)]['input']
         frame_id = self.fin[str(idx)]['frame_index'][()]
 
-        data_batch = np.array(data_batch)
+        data_batch = np.array(data_batch).astype(np.float32)
+        # data_batch = np.transpose(data_batch, (2, 0, 1))
         return data_batch, frame_id, self.filename
 
     def get_annoation(self, index):

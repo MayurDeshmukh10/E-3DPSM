@@ -238,32 +238,35 @@ class EgoEventSequence(Dataset):
             if original_dataset.isvalid():
                 original_datasets.append(original_dataset)
 
-        # TODO: Update real dataset to have the same structure as synthetic dataset
-        # new_datasets = []
-        # for original_dataset in tqdm(original_datasets, desc=f"creating streaming datasets"):
-        #     dataset_len = len(original_dataset[0])
-        #     total_sub_sequences = dataset_len // self.fixed_sequence_length
-        #     for i in range(total_sub_sequences):
-        #         frame_offset = i * self.fixed_sequence_length
-        #         new_dataset = SingleSequenceDataset(cfg,
-        #                                     original_dataset.preprocessed_input_path, 
-        #                                     original_dataset.data_path,
-        #                                     bg_input_path,
-        #                                     bg_dataset_path,
-        #                                     is_train, 
-        #                                     split, 
-        #                                     temporal_bins,
-        #                                     training_type,
-        #                                     frame_offset=frame_offset,
-        #                                     total_frames=self.fixed_sequence_length)
-        #         if new_dataset.isvalid():
-        #             new_datasets.append(new_dataset)
-
-        # self.datasets = new_datasets
-        # self.total_sequences = len(new_datasets)  # Number of valid pose sequences.
-
         self.datasets = original_datasets
         self.total_sequences = len(original_datasets)  # Number of valid pose sequences.
+
+        # TODO: Update real dataset to have the same structure as synthetic dataset
+        if training_type == 'finetune':
+            new_datasets = []
+            for original_dataset in tqdm(original_datasets, desc=f"creating streaming datasets"):
+                dataset_len = len(original_dataset[0])
+                total_sub_sequences = dataset_len // self.fixed_sequence_length
+                for i in range(total_sub_sequences):
+                    frame_offset = i * self.fixed_sequence_length
+                    new_dataset = SingleSequenceDataset(cfg,
+                                                original_dataset.preprocessed_input_path, 
+                                                original_dataset.data_path,
+                                                bg_input_path,
+                                                bg_dataset_path,
+                                                is_train, 
+                                                split, 
+                                                temporal_bins,
+                                                training_type,
+                                                frame_offset=frame_offset,
+                                                total_frames=self.fixed_sequence_length)
+                    if new_dataset.isvalid():
+                        new_datasets.append(new_dataset)
+
+            self.datasets = new_datasets
+            self.total_sequences = len(new_datasets)  # Number of valid pose sequences.
+
+        
         self.dataset_root = dataset_path
         
         print(f'Dataset root: {self.dataset_root}, split: {split}, finetune: {finetune}')

@@ -41,7 +41,7 @@ class SyntheticEventSequenceStream(Dataset):
         else:
             self.total_frames = total_frames
         
-        self.stream_path = self.processed_input_path / 'event_tensor.hdf5'
+        self.stream_path = self.processed_input_path / 'lnes.hdf5'
 
         self.fin = None 
         self.is_augmentation = augmentation
@@ -71,7 +71,7 @@ class SyntheticEventSequenceStream(Dataset):
         data_batch = self.fin[str(idx)]['input']
         frame_id = self.fin[str(idx)]['frame_index'][()]
 
-        data_batch = np.array(data_batch)
+        data_batch = np.array(data_batch).astype(np.float32)
         return data_batch, frame_id, self.filename
 
     def get_annoation(self, index):

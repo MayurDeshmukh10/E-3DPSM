@@ -6,8 +6,8 @@ model:
     model_cfg:
       num_joints: 16
       eros: True
-      input_channel: 20 #36 (works well in vis) #18 #12 #18
-      posenet_input_channel: 20
+      input_channel: 2 #20 #36 (works well in vis) #18 #12 #18
+      posenet_input_channel: 2
       image_size: [256, 192]
       batch_size: 9 #16 # 9 # individual batch size
       #heatmap_size: [config.MODEL.IMAGE_SIZE[0] // config.MODEL.HEAT_MAP_SCALE, config.MODEL.IMAGE_SIZE[1] // config.MODEL.HEAT_MAP_SCALE] TODO: fix this
@@ -38,12 +38,12 @@ model:
       delta_j3d: 0.01
       seg: 0.1
 
-    dataset_type:  synthetic # real
-    training_type: pretrain #finetune #pretrain # finetune
+    dataset_type:  real #synthetic # real
+    training_type: finetune #pretrain #finetune #pretrain # finetune
     use_bg_augmentation: true
     temporal_steps: 10
     sample_step: 0 # not used currently
-    batch_size: 9
+    batch_size: 6
     workers: 14
     tbptt_steps: 50
     fixed_sequence_length: 100
@@ -70,13 +70,13 @@ trainer:
   devices: 1
   # num_nodes: 2
   benchmark: false
-  detect_anomaly: true
+  # detect_anomaly: true
   # profiler: advanced
   # precision: bf16-mixed
   strategy: ddp_find_unused_parameters_true
   # strategy: ddp
   fast_dev_run: false
-  num_sanity_val_steps: 10
+  num_sanity_val_steps: 0
   # limit_train_batches: 200
   # limit_val_batches: 100
   # every_n_train_steps: 200
