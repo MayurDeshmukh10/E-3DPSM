@@ -11,7 +11,7 @@ from .encoder import EncoderBlock, ResidualBlock, SpatialTransformer
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
+import time
 
 class JointRegressor(nn.Module):
     def __init__(self, in_channels, num_joints):
@@ -121,6 +121,14 @@ class Event3DPoseNet(nn.Module):
         s5_states = dict()
         delta_pose = None
 
+        # times = []
+        # frq = []
+
+        # if torch.cuda.is_available():
+        #     torch.cuda.synchronize()
+
+        # start_time = time.perf_counter()
+
         x = rearrange(x, "L B C H W -> (L B) C H W").contiguous()  # where B' = (L B) is the new batch size
 
         x = self.conv1(x)
@@ -205,6 +213,19 @@ class Event3DPoseNet(nn.Module):
                 current_pose_old = previous_pose_old + delta_pose
                 delta_poses.append(delta_pose)
 
+            # if torch.cuda.is_available():
+            #     torch.cuda.synchronize()
+            # end_time = time.perf_counter()
+
+            # elapsed_time = end_time - start_time
+
+
+
+            # frequency = 1 / elapsed_time if elapsed_time > 0 else float('inf')
+
+            # times.append(elapsed_time)
+            # frq.append(frequency)
+
             current_poses.append(current_pose)
             current_poses_old.append(current_pose_old)
             abs_poses.append(abs_pose)
@@ -216,6 +237,12 @@ class Event3DPoseNet(nn.Module):
         current_poses = torch.stack(current_poses, dim=0)
         current_poses_old = torch.stack(current_poses_old, dim=0)
         abs_poses = torch.stack(abs_poses, dim=0)
+
+        # mean_time = sum(times) / len(times)
+        # mean_freq = sum(frq) / len(frq)
+
+        # print(f"Total inference time for one iteration: {mean_time * 1000:.3f} ms")
+        # print(f"Update frequency: {mean_freq:.3f} Hz")
 
         states = states.detach()
 

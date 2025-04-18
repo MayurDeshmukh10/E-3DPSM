@@ -26,6 +26,73 @@ logger = logging.getLogger(__name__)
 
 # scaler = GradScaler()
 
+
+def compute_fn_new(model, batch, prev_buffer=None, prev_key=None, batch_first=False):
+    inps = []
+
+    frame_index = []
+    gt_hms = []
+    gt_j2d = []
+    gt_j3d = []
+    gt_seg = []
+    vis_j2d = []
+    vis_j3d = []
+    vis_ja = []
+    valid_j3d = []
+    valid_seg = []
+    for (data, meta) in batch:
+        inp = data['x']
+        inps.append(inp[None, ...])    
+
+        gt_hms_ = data['hms']
+        gt_j3d_ = data['j3d'] 
+        gt_seg_ = data['segmentation_mask']
+
+        gt_j2d_ = meta['j2d']
+
+        vis_j2d_ = meta['vis_j2d']
+        vis_j3d_ = meta['vis_j3d']
+        vis_ja_ = meta['vis_ja']
+        valid_j3d_ = meta['valid_j3d']
+        valid_seg_ = meta['valid_seg']
+        frame_index_ = meta['frame_index']
+        
+
+        gt_hms.append(gt_hms_)
+        gt_j3d.append(gt_j3d_)
+        gt_seg.append(gt_seg_)
+
+        gt_j2d.append(gt_j2d_)
+        vis_j2d.append(vis_j2d_)
+        vis_j3d.append(vis_j3d_)
+        vis_ja.append(vis_ja_)
+        valid_j3d.append(valid_j3d_)
+        valid_seg.append(valid_seg_)
+
+        frame_index.append(frame_index_)
+
+    del batch
+
+    inps = torch.cat(inps, dim=0).cuda()
+
+    gt_hms = torch.cat(gt_hms, dim=0).cuda()
+    gt_j3d = torch.cat(gt_j3d, dim=0).cuda()
+    gt_seg = torch.cat(gt_seg, dim=0).cuda()
+
+    gt_j2d = torch.cat(gt_j2d, dim=0).cuda()
+    vis_j2d = torch.cat(vis_j2d, dim=0).cuda()
+    vis_j3d = torch.cat(vis_j3d, dim=0).cuda()
+    vis_ja = torch.cat(vis_ja, dim=0).cuda()
+    valid_j3d = torch.cat(valid_j3d, dim=0).cuda()
+    valid_seg = torch.cat(valid_seg, dim=0).cuda()
+    frame_index = torch.cat(frame_index, dim=0).cuda()
+    
+    outputs = model(inps, augmentation_data={})
+
+    T, B, C, H, W = inps.shape
+
+    return inps.view(T * B, C, H, W), outputs, gt_hms, gt_j3d, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index, vis_ja
+
 def compute_fn(model, batch, temporal_steps, device='cuda'):
     inps = []
     new_inps = []
@@ -42,6 +109,8 @@ def compute_fn(model, batch, temporal_steps, device='cuda'):
     bg_mask = []
     use_bg = []
     filename = []
+    vis_ja = []
+
 
     augmentation_data = {}
 
@@ -66,6 +135,8 @@ def compute_fn(model, batch, temporal_steps, device='cuda'):
         bg_mask_t = []
         filename_t = []
         use_bg_t = []
+        vis_ja_t = []
+
         skip_augmentation_data = False
         for data, meta in zip(data_batch, meta_batch):
             inp = data['x'][i]
@@ -82,7 +153,9 @@ def compute_fn(model, batch, temporal_steps, device='cuda'):
             valid_j3d_ = meta['valid_j3d'][i]
             valid_seg_ = meta['valid_seg'][i]
             frame_index_ = meta['frame_index'][i]
-            pose_filename_ = meta['pose_filename'][i]
+            vis_ja_ = meta['vis_ja'][i]
+
+            # pose_filename_ = meta['pose_filename'][i]
              
             try:
                 # if meta['use_bg'][i] == True:
@@ -103,13 +176,16 @@ def compute_fn(model, batch, temporal_steps, device='cuda'):
             gt_j3d_t.append(gt_j3d_)
             gt_seg_t.append(gt_seg_)
 
+            vis_ja_t.append(vis_ja_)
+
+
             gt_j2d_t.append(gt_j2d_)
             vis_j2d_t.append(vis_j2d_)
             vis_j3d_t.append(vis_j3d_)
             valid_j3d_t.append(valid_j3d_)
             valid_seg_t.append(valid_seg_)
             
-            filename_t.append(pose_filename_)
+            # filename_t.append(pose_filename_)
             frame_index.append(frame_index_)
         
         # bg_data.append(bg_data_t)
@@ -125,8 +201,11 @@ def compute_fn(model, batch, temporal_steps, device='cuda'):
         vis_j3d.append(torch.stack(vis_j3d_t))
         valid_j3d.append(torch.stack(valid_j3d_t))
         valid_seg.append(torch.stack(valid_seg_t))
-        filename.append(filename_t)
+        # filename.append(filename_t)
         # filename.append
+
+        vis_ja.append(torch.stack(vis_ja_t))
+
 
         
         max_rows = max([inp.shape[0] for inp in inps_t])
@@ -156,6 +235,8 @@ def compute_fn(model, batch, temporal_steps, device='cuda'):
     vis_j2d = torch.stack(vis_j2d)
     vis_j3d = torch.stack(vis_j3d)
     valid_j3d = torch.stack(valid_j3d)
+    vis_ja = torch.stack(vis_ja)
+
     # valid_seg = torch.cat([v.unsqueeze(0) for v in valid_seg])
     valid_seg = torch.stack(valid_seg)
     frame_index = torch.cat([v.unsqueeze(0) for v in frame_index], dim=0)
@@ -183,7 +264,7 @@ def compute_fn(model, batch, temporal_steps, device='cuda'):
     #     return inps, _, gt_hms, gt_j3d, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index, False
 
     T, B, N, C = inps.shape
-    return inps.view(T * B, N, C), outputs, gt_hms, gt_j3d, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index, filename
+    return inps.view(T * B, N, C), outputs, gt_hms, gt_j3d, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index, vis_ja
 
 def compute_fn_v2(model, batch, temporal_steps, device='cuda'):
     data_batch, meta_batch = batch
@@ -512,8 +593,6 @@ def compute_fn_v4(model, batch, prev_buffer=None, prev_key=None, batch_first=Fal
     # }
 
     augmentation_data = {}
-
-    # import pdb; pdb.set_trace()
 
     outputs = model(inps, augmentation_data=augmentation_data)
     

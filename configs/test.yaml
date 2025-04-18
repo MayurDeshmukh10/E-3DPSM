@@ -62,10 +62,11 @@ model:
 
 # ckpt_path: /CT/EventEgo3Dv2/work/EventEgo3Dv2/results/wandb_data/pretraining_new_dataloader_oom_fixed_5/EventEgo3Dv2/a48pwu92/checkpoints/epoch=6.ckpt
 # ckpt_path: /CT/EventEgo3Dv2/work/EventEgo3Dv2/results/wandb_data/pretraining_new_dataloader_oom_fixed_5_1/EventEgo3Dv2/ha8vz1xf/checkpoints/epoch=9.ckpt
+ckpt_path: /CT/EventEgo3Dv2/work/code_variations/dp_att_lkf_lnes/results/wandb_data/finetune_att_lkf_lnes_epoch_last/epoch=33.ckpt
 
 trainer:
   accelerator: gpu
-  max_epochs: 1
+  max_epochs: 80
   check_val_every_n_epoch: 1
   devices: 1
   # num_nodes: 2
@@ -76,7 +77,7 @@ trainer:
   strategy: ddp_find_unused_parameters_true
   # strategy: ddp
   fast_dev_run: false
-  num_sanity_val_steps: 0
+  num_sanity_val_steps: 50
   # limit_train_batches: 200
   # limit_val_batches: 100
   # every_n_train_steps: 200

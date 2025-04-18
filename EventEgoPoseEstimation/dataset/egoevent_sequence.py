@@ -242,7 +242,7 @@ class EgoEventSequence(Dataset):
         self.total_sequences = len(original_datasets)  # Number of valid pose sequences.
 
         # TODO: Update real dataset to have the same structure as synthetic dataset
-        if training_type == 'finetune':
+        if training_type in ['pretrain', 'finetune']:
             new_datasets = []
             for original_dataset in tqdm(original_datasets, desc=f"creating streaming datasets"):
                 dataset_len = len(original_dataset[0])
