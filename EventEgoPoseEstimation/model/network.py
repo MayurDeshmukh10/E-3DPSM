@@ -53,9 +53,9 @@ class EgoHPE(nn.Module):
         # self.EROS = EROS(inp_chn=self.num_bins, height=self.height, width=self.width, batch_size=self.batch_size)
 
 
-    def forward(self, x, augmentation_data, device='cuda'):
+    def forward(self, x, s5_state=None, augmentation_data={}, device='cuda'):
 
-        s5_state = None
+        # s5_state = None
         re_s5_state = None
         pose = None
         old_pose = None

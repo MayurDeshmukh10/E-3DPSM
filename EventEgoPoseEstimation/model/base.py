@@ -146,7 +146,7 @@ class Event3DPoseNet(nn.Module):
                 batch_size=B * h_new * w_new
             ).to(x.device)
         else:
-            states = rearrange(states, "B C H W -> (B H W) C").contiguous()
+            states = rearrange(prev_5_states, "B C H W -> (B H W) C").contiguous()
 
         # x = rearrange(x, "B C H W -> (B H W) 1 C").contiguous()
         x = rearrange(x, "(L B) C H W -> (B H W) L C", L=T).contiguous()
@@ -193,7 +193,8 @@ class Event3DPoseNet(nn.Module):
         for i in range(T):
             if i == 0:
                 current_pose = self.initial_pose_head(x[i])
-                kalman_filter.initialize(current_pose.reshape(B, -1))
+                if not kalman_filter.initialized:
+                    kalman_filter.initialize(current_pose.reshape(B, -1))
                 previous_pose = current_pose
                 abs_pose = current_pose
                 current_pose_old = current_pose

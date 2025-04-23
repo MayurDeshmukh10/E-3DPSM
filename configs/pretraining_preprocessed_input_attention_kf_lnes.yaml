@@ -30,7 +30,7 @@ model:
     use_bg_augmentation: true
     temporal_steps: 10
     sample_step: 0 # not used currently
-    batch_size: 6
+    batch_size: 5
     workers: 14
     tbptt_steps: 50
     fixed_sequence_length: 100

@@ -121,6 +121,25 @@ def create_concatenated_image(color, voxel_image):
 
     return concatenated_image
 
+
+def visualize(lnes: np.ndarray):
+    if isinstance(lnes, torch.Tensor):
+        lnes = lnes.permute(1, 2, 0)
+        lnes = lnes.detach()   
+
+    lnes = lnes.copy() * 255
+    lnes = lnes.astype(np.uint8)
+            
+    h, w = lnes.shape[:2]
+
+    b = lnes[..., :1]
+    r = lnes[..., 1:]
+    g = np.zeros((h, w, 1), dtype=np.uint8)
+
+    lnes = np.concatenate([r, g, b], axis=2).astype(np.uint8)
+
+    return lnes
+
 def accuracy_with_vis(gt3ds, preds, valid_j3d, batch_idx, pred_abs_poses_t, gt_j3d_t, input, pose_filename, frame_indexes):
     if isinstance(gt3ds, torch.Tensor):
         gt3ds = gt3ds.detach()
@@ -143,25 +162,28 @@ def accuracy_with_vis(gt3ds, preds, valid_j3d, batch_idx, pred_abs_poses_t, gt_j
 
     for i in range(joint_error.shape[0]):
         avg_error = joint_error[i].sum() / 16
-        if avg_error > 500:
-            for j in range(pred_abs_poses_t.size(0)):
-                color = dump_sketelon_image(gt_j3d_t[j][i].detach(), pred_abs_poses_t[j][i].detach(), f"./visualizations/new_dataloader")
-                voxel = input[j][i]
-                voxel_image = save_augmented_data(voxel, 'test')
-                concatenated_image = create_concatenated_image(color, voxel_image)
-                filename = pose_filename[j][i]
-                frame_index = frame_indexes[j][i]
-                # output_path = './visualizations/new_dataloader_val_debug/train/{avg_err:.3f}_bat_{batch_idx}_{file}_ts_{ts}.png'.format(avg_err=avg_error.item(), batch_idx=batch_idx, file=filename, ts=j)
-                output_path = './visualizations/new_dataloader_val_debug/test/bat_{batch_idx}_fi_{frame_index}_{file}_ts_{ts}_{avg_err:.3f}.png'.format(avg_err=avg_error.item(), batch_idx=batch_idx, file=filename, ts=j, frame_index=frame_index)
-                # output_path = f"./visualizations/new_dataloader_val_debug/test/{avg_error.item()}_{batch_idx}_temporal_step_{j}.png"
-                cv2.imwrite(output_path, concatenated_image)
-                break
+        # index = frame_indexes + i
+        if avg_error > 10:
+            # for j in range(pred_abs_poses_t.size(0)):
+            color = dump_sketelon_image(gt_j3d_t[i][0].detach(), pred_abs_poses_t[i][0].detach(), f"./visualizations/new_dataloader")
+            voxel = visualize(input[i].permute(1,2,0).cpu().numpy())
+            # voxel_image = save_augmented_data(voxel, 'test')
+            concatenated_image = create_concatenated_image(color, voxel)
+            # filename = pose_filename[j][i]
+            # frame_index = frame_indexes[j][i]
+            # output_path = './visualizations/new_dataloader_val_debug/train/{avg_err:.3f}_bat_{batch_idx}_{file}_ts_{ts}.png'.format(avg_err=avg_error.item(), batch_idx=batch_idx, file=filename, ts=j)
+            # output_path = './visualizations/new_dataloader_val_debug/test/bat_{batch_idx}_fi_{frame_index}_{file}_ts_{ts}_{avg_err:.3f}.png'.format(avg_err=avg_error.item(), batch_idx=batch_idx, file=filename, ts=j, frame_index=frame_index)
+            output_path = './visualizations/33msec_seq/{batch_idx}_ts_{ts}_{avg_err:.3f}.png'.format(avg_err=avg_error.item(), batch_idx=batch_idx, ts=frame_indexes)
+            frame_indexes += 1
+            # output_path = f"./visualizations/test/{batch_idx}_temporal_step_{i}_{avg_error.item()}.png"
+            cv2.imwrite(output_path, concatenated_image)
+            # break
 
 
     # joint_error = np.sum(joint_error) / cnt
     joint_error = torch.sum(joint_error) / cnt
     
-    return joint_error, cnt
+    return joint_error, cnt, frame_indexes
 
 
 def root_accuracy(gt3ds, preds, valid_j3d):
@@ -187,3 +209,23 @@ def root_accuracy(gt3ds, preds, valid_j3d):
     joint_error = np.sum(joint_error) / cnt
 
     return joint_error, cnt
+
+
+def compute_motion_jitter(pred_abs_poses, gt_abs_poses, valid_poses):
+    T, B, J, _ = pred_abs_poses.shape
+
+    pred_abs_poses = pred_abs_poses * valid_poses
+    gt_abs_poses = gt_abs_poses * valid_poses
+
+    # Compute the position difference between consecutive frames
+    pred_diff = pred_abs_poses[1:] - pred_abs_poses[:-1]
+    jit_X = torch.norm(pred_diff, dim=-1)
+
+    gt_diff = gt_abs_poses[1:] - gt_abs_poses[:-1]
+    jit_GT = torch.norm(gt_diff, dim=-1)
+
+    jitter_diff = torch.abs(jit_GT - jit_X)
+
+    e_smooth = torch.sum(jitter_diff) / ((T * B * J))
+
+    return e_smooth

@@ -39,30 +39,34 @@ model:
       seg: 0.1
 
     dataset_type:  real #synthetic # real
-    training_type: finetune #pretrain #finetune #pretrain # finetune
+    training_type: finetune #finetune #pretrain #finetune #EE3D-W-finetuning
     use_bg_augmentation: true
     temporal_steps: 10
     sample_step: 0 # not used currently
     batch_size: 6
     workers: 14
-    tbptt_steps: 50
-    fixed_sequence_length: 100
+    tbptt_steps: 5
+    fixed_sequence_length: 500
 
 
     dataset:
       syn_preprocessed_input_path: /scratch/inf0/user/mdeshmuk/EE3D-preprocessed/EE3D-S
-      real_preprocessed_input_path: "/scratch/inf0/user/mdeshmuk/EE3D-preprocessed/EE3D-R" 
+      real_preprocessed_input_path: "/scratch/inf0/user/mdeshmuk/EE3D-preprocessed/EE3D-R-33msec"
       syn_dataset_root_path: /CT/datasets07/nobackup/EE3D-S
       syn_test_dataset_root_path: /CT/datasets07/nobackup/EE3D-S-Test
       real_dataset_root_path: /CT/datasets07/nobackup/EE3D-R/Real_Dataset
       bg_dataset_root_path: /CT/datasets07/nobackup/EE3D-R/Background_Dataset
       bg_preprocessed_input_path: /scratch/inf0/user/mdeshmuk/EE3D-preprocessed/EE3D-BG
+      wild_preprocessed_input_path: /scratch/inf0/user/mdeshmuk/EE3D-preprocessed/EE3D-W
+      wild_dataset_root_path: /CT/datasets07/nobackup/EE3D-W/Outdoor_Dataset
 
 
 
 # ckpt_path: /CT/EventEgo3Dv2/work/EventEgo3Dv2/results/wandb_data/pretraining_new_dataloader_oom_fixed_5/EventEgo3Dv2/a48pwu92/checkpoints/epoch=6.ckpt
 # ckpt_path: /CT/EventEgo3Dv2/work/EventEgo3Dv2/results/wandb_data/pretraining_new_dataloader_oom_fixed_5_1/EventEgo3Dv2/ha8vz1xf/checkpoints/epoch=9.ckpt
-ckpt_path: /CT/EventEgo3Dv2/work/code_variations/dp_att_lkf_lnes/results/wandb_data/finetune_att_lkf_lnes_epoch_last/epoch=33.ckpt
+
+# ckpt_path: /CT/EventEgo3Dv2/work/code_variations/dp_att_lkf_lnes/results/wandb_data/pre_att_lkf_lnes/epoch=31.ckpt
+ckpt_path: /CT/EventEgo3Dv2/work/code_variations/dp_att_lkf_lnes/results/wandb_data/finetune_att_lkf_lnes_epoch_last/epoch=39.ckpt
 
 trainer:
   accelerator: gpu
@@ -92,7 +96,7 @@ trainer:
         every_n_epochs: 1
         save_top_k: -1
         filename: "{epoch}"
-    # - class_path: EventEgoPoseEstimation.modules.pose_estimation.EvaluateCallback
+    - class_path: EventEgoPoseEstimation.modules.pose_estimation.EvaluateCallback
     - class_path: pytorch_lightning.callbacks.ModelCheckpoint
       init_args:
         every_n_train_steps: 10000

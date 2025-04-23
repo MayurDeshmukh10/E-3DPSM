@@ -422,7 +422,7 @@ def compute_fn_v2(model, batch, temporal_steps, device='cuda'):
     # T, B, N, C = inps.shape
     return (len(inps) * len(inps[0])), outputs, gt_hms, gt_j3d, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index, filename
 
-def compute_fn_v3(model, batch, prev_buffer=None, prev_key=None, batch_first=False):
+def compute_fn_v3(model, batch, s5_state, prev_buffer=None, prev_key=None, batch_first=False):
     inps = []
 
     frame_index = []
@@ -505,12 +505,12 @@ def compute_fn_v3(model, batch, prev_buffer=None, prev_key=None, batch_first=Fal
     }
 
     # inps = inps.permute(0, 1, 4, 2, 3)
-    outputs = model(inps, augmentation_data=augmentation_data)
+    outputs = model(inps, s5_state, augmentation_data=augmentation_data)
     
     T, B, C, H, W = inps.shape
     return inps.view(T * B, C, H, W), outputs, gt_hms, gt_j3d, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index, filename, vis_ja
 
-def compute_fn_v4(model, batch, prev_buffer=None, prev_key=None, batch_first=False):
+def compute_fn_v4(model, batch, s5_state, prev_buffer=None, prev_key=None, batch_first=False):
 
     inps = []
 
@@ -594,7 +594,7 @@ def compute_fn_v4(model, batch, prev_buffer=None, prev_key=None, batch_first=Fal
 
     augmentation_data = {}
 
-    outputs = model(inps, augmentation_data=augmentation_data)
+    outputs = model(inps, s5_state, augmentation_data=augmentation_data)
     
     T, B, C, H, W = inps.shape
     return inps.view(T * B, C, H, W), outputs, gt_hms, gt_j3d, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index, filename

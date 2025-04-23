@@ -13,4 +13,5 @@ cd /CT/EventEgo3Dv2/work/code_variations/dp_att_lkf_lnes
   
 source activate ee3dh100
 
-EXP_NAME='eval_att_finetuning_processed_epoch_29_lkf_hope' TRAINING_TYPE='pretrain' BATCH_SIZE=9 srun python3 run.py test --config ./configs/evaluate_finetune_preprocessed_input_attention_kf_lnes.yaml
+# EXP_NAME='eval_att_finetuning_best_epoch_w_jitter_ts_10' TRAINING_TYPE='pretrain' BATCH_SIZE=9 srun python3 run.py test --config ./configs/evaluate_finetune_preprocessed_input_attention_kf_lnes.yaml
+EXP_NAME='eval_att_finetuning_best_epoch_w_jitter_ts_10' TRAINING_TYPE='pretrain' BATCH_SIZE=9 srun python3 run.py test --config ./configs/test.yaml
