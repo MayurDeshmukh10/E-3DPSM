@@ -155,7 +155,7 @@ def accuracy_with_vis(gt3ds, preds, valid_j3d, batch_idx, pred_abs_poses_t, gt_j
     # cnt = np.sum(valid_j3d)
     cnt = torch.sum(valid_j3d)
     if cnt == 0:
-        return 0, 0
+        return 0, 0, frame_indexes
     
     # joint_error = np.sqrt(np.sum((gt3ds1 - preds1)**2, axis=-1))
     joint_error = torch.sqrt(torch.sum((gt3ds1 - preds1) ** 2, dim=-1))
@@ -163,7 +163,7 @@ def accuracy_with_vis(gt3ds, preds, valid_j3d, batch_idx, pred_abs_poses_t, gt_j
     for i in range(joint_error.shape[0]):
         avg_error = joint_error[i].sum() / 16
         # index = frame_indexes + i
-        if avg_error > 10:
+        if avg_error > 130:
             # for j in range(pred_abs_poses_t.size(0)):
             color = dump_sketelon_image(gt_j3d_t[i][0].detach(), pred_abs_poses_t[i][0].detach(), f"./visualizations/new_dataloader")
             voxel = visualize(input[i].permute(1,2,0).cpu().numpy())
@@ -174,10 +174,11 @@ def accuracy_with_vis(gt3ds, preds, valid_j3d, batch_idx, pred_abs_poses_t, gt_j
             # output_path = './visualizations/new_dataloader_val_debug/train/{avg_err:.3f}_bat_{batch_idx}_{file}_ts_{ts}.png'.format(avg_err=avg_error.item(), batch_idx=batch_idx, file=filename, ts=j)
             # output_path = './visualizations/new_dataloader_val_debug/test/bat_{batch_idx}_fi_{frame_index}_{file}_ts_{ts}_{avg_err:.3f}.png'.format(avg_err=avg_error.item(), batch_idx=batch_idx, file=filename, ts=j, frame_index=frame_index)
             output_path = './visualizations/33msec_seq/{batch_idx}_ts_{ts}_{avg_err:.3f}.png'.format(avg_err=avg_error.item(), batch_idx=batch_idx, ts=frame_indexes)
-            frame_indexes += 1
+            
             # output_path = f"./visualizations/test/{batch_idx}_temporal_step_{i}_{avg_error.item()}.png"
             cv2.imwrite(output_path, concatenated_image)
             # break
+        frame_indexes += 1
 
 
     # joint_error = np.sum(joint_error) / cnt
