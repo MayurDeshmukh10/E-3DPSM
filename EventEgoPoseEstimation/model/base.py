@@ -94,7 +94,7 @@ class Event3DPoseNet(nn.Module):
             ),
         ])
 
-        self.s5_block = S5Block(dim=192, state_dim=192, bidir=False, bandlimit=0.5)
+        self.s5_block = S5Block(dim=192, state_dim=96, bidir=True, bandlimit=None)
 
         self.segmentation_decoder = nn.ModuleList([
             DecoderConv(192, 192, 2),
@@ -109,6 +109,11 @@ class Event3DPoseNet(nn.Module):
 
         self.initial_pose_head = JointRegressor(9216, num_joints=self.n_joints)
         self.delta_head = JointRegressor(9216 + self.pose_embed_dim, num_joints=self.n_joints)
+        self.pre_s5 = nn.Conv2d(
+            in_channels=192,
+            out_channels=384,
+            kernel_size=1
+        )
 
 
     def forward(self, x, prev_5_states, previous_pose, previous_pose_old, kalman_filter, first_temporal_step=False):
@@ -149,8 +154,11 @@ class Event3DPoseNet(nn.Module):
             states = rearrange(prev_5_states, "B C H W -> (B H W) C").contiguous()
 
         # x = rearrange(x, "B C H W -> (B H W) 1 C").contiguous()
+        # import pdb; pdb.set_trace()
+        # x = self.pre_s5(x)
+
         x = rearrange(x, "(L B) C H W -> (B H W) L C", L=T).contiguous()
-        
+
         x, states = self.s5_block(x, states)
 
         x = rearrange(

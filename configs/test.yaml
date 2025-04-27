@@ -9,7 +9,7 @@ model:
       input_channel: 2 #20 #36 (works well in vis) #18 #12 #18
       posenet_input_channel: 2
       image_size: [256, 192]
-      batch_size: 9 #16 # 9 # individual batch size
+      batch_size: 4 #16 # 9 # individual batch size
       #heatmap_size: [config.MODEL.IMAGE_SIZE[0] // config.MODEL.HEAT_MAP_SCALE, config.MODEL.IMAGE_SIZE[1] // config.MODEL.HEAT_MAP_SCALE] TODO: fix this
     
     # dataset_cfg:
@@ -41,17 +41,18 @@ model:
     dataset_type:  real #synthetic # real
     training_type: finetune #finetune #pretrain #finetune #EE3D-W-finetuning
     use_bg_augmentation: true
-    temporal_steps: 10
+    temporal_steps: 20
     sample_step: 0 # not used currently
-    batch_size: 6
-    workers: 14
-    tbptt_steps: 5
-    fixed_sequence_length: 500
+    batch_size: 3
+    workers: 4
+    tbptt_steps: 20
+    fixed_sequence_length: 20
 
 
     dataset:
       syn_preprocessed_input_path: /scratch/inf0/user/mdeshmuk/EE3D-preprocessed/EE3D-S
-      real_preprocessed_input_path: "/scratch/inf0/user/mdeshmuk/EE3D-preprocessed/EE3D-R-33msec"
+      real_preprocessed_input_path: "/scratch/inf0/user/mdeshmuk/EE3D-preprocessed/EE3D-R"
+      # real_preprocessed_input_path: "/scratch/inf0/user/mdeshmuk/EE3D-preprocessed/EE3D-R-33msec"
       syn_dataset_root_path: /CT/datasets07/nobackup/EE3D-S
       syn_test_dataset_root_path: /CT/datasets07/nobackup/EE3D-S-Test
       real_dataset_root_path: /CT/datasets07/nobackup/EE3D-R/Real_Dataset
@@ -66,7 +67,9 @@ model:
 # ckpt_path: /CT/EventEgo3Dv2/work/EventEgo3Dv2/results/wandb_data/pretraining_new_dataloader_oom_fixed_5_1/EventEgo3Dv2/ha8vz1xf/checkpoints/epoch=9.ckpt
 
 # ckpt_path: /CT/EventEgo3Dv2/work/code_variations/dp_att_lkf_lnes/results/wandb_data/pre_att_lkf_lnes/epoch=31.ckpt
-ckpt_path: /CT/EventEgo3Dv2/work/code_variations/dp_att_lkf_lnes/results/wandb_data/finetune_att_lkf_lnes_epoch_last/epoch=39.ckpt
+# ckpt_path: /CT/EventEgo3Dv2/work/code_variations/dp_att_lkf_lnes/results/wandb_data/finetune_att_lkf_lnes_epoch_last/epoch=39.ckpt
+
+ckpt_path: /CT/EventEgo3Dv2/work/code_variations/dp_att_lkf_lnes/results/wandb_data/bidir_pre_att_lkf_lnes_20_ts/last.ckpt
 
 trainer:
   accelerator: gpu
@@ -78,12 +81,12 @@ trainer:
   # detect_anomaly: true
   # profiler: advanced
   # precision: bf16-mixed
-  strategy: ddp_find_unused_parameters_true
+  # strategy: ddp_find_unused_parameters_true
   # strategy: ddp
   fast_dev_run: false
-  num_sanity_val_steps: 50
-  # limit_train_batches: 200
-  # limit_val_batches: 100
+  num_sanity_val_steps: 0
+  # limit_train_batches: 50
+  limit_val_batches: 100
   # every_n_train_steps: 200
   # gradient_clip_val: 5
   # gradient_clip_algorithm: norm

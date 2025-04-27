@@ -56,18 +56,44 @@ def apply_ssm(
         # Static timesteps
         Bu_elements = torch.vmap(lambda u: B_bars @ u)(cinput_sequence)
 
-    if Lambda_bars.ndim == 1:  # Repeat for associative_scan
-        Lambda_bars = Lambda_bars.tile(input_sequence.shape[0], 1)
+    # if Lambda_bars.ndim == 1:  # Repeat for associative_scan
+    #     Lambda_bars = Lambda_bars.tile(input_sequence.shape[0], 1)
 
-    Lambda_bars[0] = Lambda_bars[0] * prev_state
+    # Lambda_bars[0] = Lambda_bars[0] * prev_state
 
-    _, xs = associative_scan(binary_operator, (Lambda_bars, Bu_elements))
+    # _, xs = associative_scan(binary_operator, (Lambda_bars, Bu_elements))
+
+    # if bidir:
+    #     _, xs2 = associative_scan(
+    #         binary_operator, (Lambda_bars, Bu_elements), reverse=True
+    #     )
+    #     xs = torch.cat((xs, xs2), axis=-1)
+
+    if Lambda_bars.ndim == 1:
+        Lambda_bars = Lambda_bars.tile(input_sequence.shape[0], 1)  # (T, p)
 
     if bidir:
-        _, xs2 = associative_scan(
-            binary_operator, (Lambda_bars, Bu_elements), reverse=True
+        # split the 2*p state into forward/back halves
+        p = prev_state.shape[-1] // 2
+        prev_f, prev_b = prev_state.split(p, dim=-1)
+        # --- forward scan seeded by prev_f ---
+        Lf = Lambda_bars.clone()
+        Lf[0] = Lf[0] * prev_f
+
+        _, xs_f = associative_scan(binary_operator, (Lf, Bu_elements))
+
+        # --- backward scan seeded by prev_b ---
+        Lb = Lambda_bars.clone()
+        Lb[0] = Lb[0] * prev_b
+        _, xs_b = associative_scan(
+            binary_operator, (Lb, Bu_elements), reverse=True
         )
-        xs = torch.cat((xs, xs2), axis=-1)
+
+        xs = torch.cat((xs_f, xs_b), dim=-1)  # (T, batch, 2*p)
+
+    else:
+        Lambda_bars[0] = Lambda_bars[0] * prev_state
+        _, xs = associative_scan(binary_operator, (Lambda_bars, Bu_elements))
 
     Du = torch.vmap(lambda u: D * u)(input_sequence)
     # TODO: the last element of xs (non-bidir) is the hidden state, allow returning it
@@ -263,10 +289,19 @@ class S5SSM(torch.nn.Module):
             step = step_scale * torch.exp(self.log_step)
 
             freqs = step / step_scale * self.Lambda[:, 1].abs() / (2 * math.pi)
-            mask = torch.where(freqs < bandlimit * 0.5, 1, 0)  # (64, )
-            self.C = torch.nn.Parameter(
-                torch.view_as_real(torch.view_as_complex(self.C) * mask)
-            )
+            # mask = torch.where(freqs < bandlimit * 0.5, 1, 0)  # (64, )
+            mask = (freqs < bandlimit * 0.5).to(self.C.dtype)  # (p,)
+
+            if self.bidir:
+                # duplicate the mask for forward+backward channels → (2*p,)
+                mask = torch.cat([mask, mask], dim=0)
+
+            # self.C = torch.nn.Parameter(
+            #     torch.view_as_real(torch.view_as_complex(self.C) * mask)
+            # )
+
+            C_bandlimited = torch.view_as_complex(self.C) * mask
+            self.C = torch.nn.Parameter(torch.view_as_real(C_bandlimited))
 
     def initial_state(self, batch_size: Optional[int]):
         batch_shape = (batch_size,) if batch_size is not None else ()

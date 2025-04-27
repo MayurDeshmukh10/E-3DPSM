@@ -402,8 +402,8 @@ class EventEgoPoseEstimation(LightningModule):
         return dataloader
 
 
-    # def on_load_checkpoint(self, checkpoint: dict):
-    #     checkpoint['optimizer_states'][0]['param_groups'][0]['lr'] =  self.lr
+    def on_load_checkpoint(self, checkpoint: dict):
+        checkpoint['optimizer_states'][0]['param_groups'][0]['lr'] =  self.lr
 
     def training_step(self, batch, batch_idx):
         end = time.time()
@@ -903,12 +903,12 @@ class EventEgoPoseEstimation(LightningModule):
         self.acc.reset()
 
 
-        if self.training_type == 'finetune':
-            with torch.no_grad():
-                default_process_var = 1e-3
-                default_measurement_var = 1e-2
-                self.model.kalman_filter.log_process_var.data.fill_(np.log(default_process_var))
-                self.model.kalman_filter.log_measurement_var.data.fill_(np.log(default_measurement_var))
+        # if self.training_type == 'finetune':
+        #     with torch.no_grad():
+        #         default_process_var = 1e-3
+        #         default_measurement_var = 1e-2
+        #         self.model.kalman_filter.log_process_var.data.fill_(np.log(default_process_var))
+        #         self.model.kalman_filter.log_measurement_var.data.fill_(np.log(default_measurement_var))
 
         # if self.lr:
         #     # Overwrite learning rate after running LearningRateFinder
