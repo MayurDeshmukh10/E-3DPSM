@@ -6,7 +6,7 @@ from .s5.s5_model import S5Block
 import torch.nn.functional as F
 from einops import rearrange
 from .encoder import EncoderBlock, ResidualBlock, SpatialTransformer
-
+from .decoder import JointQueryDecoder
 
 import torch
 import torch.nn as nn
@@ -37,17 +37,19 @@ class PoseEmbedding(nn.Module):
     def __init__(self, num_joints, embed_dim=32):
         super(PoseEmbedding, self).__init__()
         self.num_joints = num_joints
+
         self.fc = nn.Sequential(
-            nn.Linear(num_joints * 3, 64),
+            nn.Linear(3, 64),
             nn.ReLU(inplace=True),
             nn.Linear(64, embed_dim)
         )
         
     def forward(self, pose):
         # pose: [B, num_joints, 3]
-        B = pose.size(0)
-        x = pose.view(B, -1)  # Flatten to shape [B, num_joints * 3]
+        B, J, _ = pose.shape
+        x = pose.view(B * J, 3)  # Flatten to shape [B, num_joints * 3]
         embedding = self.fc(x)  # [B, embed_dim]
+        embedding = embedding.view(B, J, -1)
         return embedding
 
 class Event3DPoseNet(nn.Module):
@@ -94,27 +96,34 @@ class Event3DPoseNet(nn.Module):
             ),
         ])
 
-        self.s5_block = S5Block(dim=192, state_dim=96, bidir=True, bandlimit=None)
+        # self.s5_block = S5Block(dim=192, state_dim=96, bidir=True, bandlimit=None)
 
-        self.segmentation_decoder = nn.ModuleList([
-            DecoderConv(192, 192, 2),
-            DecoderConv(2 * 192, 128, 2, sampler='up'),
-            DecoderConv(2 * 128, 64, 2, sampler='up'),
-            DecoderConv(2 * 64, 32, 2, sampler='up'),
+        self.s5_blocks = nn.ModuleList([
+            S5Block(dim=32, state_dim=16, bidir=True, bandlimit=0.5),
+            S5Block(dim=64, state_dim=32, bidir=True, bandlimit=0.5),
+            S5Block(dim=128, state_dim=64, bidir=True, bandlimit=0.5),
+            S5Block(dim=192, state_dim=96, bidir=True, bandlimit=0.5)
         ])
-        self.segmentation_head = Head(2 * 32, 1)
-        self.seg_proj_conv = nn.Conv2d(in_channels=64, out_channels=192, kernel_size=1)
+
+        # self.decoder = nn.ModuleList([
+        #     DecoderConv(192, 192, 2),
+        #     DecoderConv(2 * 192, 128, 2, sampler='up'),
+        #     DecoderConv(2 * 128, 64, 2, sampler='up'),
+        #     DecoderConv(2 * 64, 32, 2, sampler='up'),
+        # ])
+
+        self.query_decoder = JointQueryDecoder(192, self.n_joints)
+
+
+        # self.segmentation_head = Head(2 * 32, 1)
+        # self.seg_proj_conv = nn.Conv2d(in_channels=64, out_channels=192, kernel_size=1)
 
         self.pose_embedding = PoseEmbedding(self.n_joints, embed_dim=self.pose_embed_dim)
 
-        self.initial_pose_head = JointRegressor(9216, num_joints=self.n_joints)
-        self.delta_head = JointRegressor(9216 + self.pose_embed_dim, num_joints=self.n_joints)
-        self.pre_s5 = nn.Conv2d(
-            in_channels=192,
-            out_channels=384,
-            kernel_size=1
-        )
-
+        # self.initial_pose_head = JointRegressor(9216, num_joints=self.n_joints)
+        # self.delta_head = JointRegressor(9216 + self.pose_embed_dim, num_joints=self.n_joints)
+        self.initial_pose_head = nn.Linear(192, 3)
+        self.delta_head = nn.Linear(256, 3)
 
     def forward(self, x, prev_5_states, previous_pose, previous_pose_old, kalman_filter, first_temporal_step=False):
         
@@ -126,71 +135,44 @@ class Event3DPoseNet(nn.Module):
         s5_states = dict()
         delta_pose = None
 
-        # times = []
-        # frq = []
-
-        # if torch.cuda.is_available():
-        #     torch.cuda.synchronize()
-
-        # start_time = time.perf_counter()
-
         x = rearrange(x, "L B C H W -> (L B) C H W").contiguous()  # where B' = (L B) is the new batch size
 
         x = self.conv1(x)
 
-        for stage, encoder_block in enumerate(self.encoder_backbone):
+        for stage, (encoder_block, s5_block) in enumerate(zip(self.encoder_backbone, self.s5_blocks)):
             x = encoder_block(x)
+            new_h, new_w = x.shape[-2:]
+            if prev_5_states[stage] is None:
+                s5_state = s5_block.s5.initial_state(
+                    batch_size=B * new_h * new_w
+                ).to(x.device)
+            else:
+                s5_state = rearrange(prev_5_states[stage], "B C H W -> (B H W) C").contiguous()
+
+            x = rearrange(x, "(L B) C H W -> (B H W) L C", L=T).contiguous()
+
+            x, new_s5_state = s5_block(x, s5_state)
+
+            x = rearrange(x, "(B H W) L C -> (L B) C H W", B=B, H=int(new_h), W=int(new_w)).contiguous()
+            new_s5_state = rearrange(new_s5_state, "(B H W) C -> B C H W", H=new_h, W=new_w).contiguous()
+
             feature_maps.append(x)
+            s5_states[stage] = new_s5_state
 
         x = feature_maps[-1]
         feature_maps = feature_maps[::-1]
-        h_new, w_new = x.shape[-2:]
 
-        if prev_5_states is None:
-            states = self.s5_block.s5.initial_state(
-                batch_size=B * h_new * w_new
-            ).to(x.device)
-        else:
-            states = rearrange(prev_5_states, "B C H W -> (B H W) C").contiguous()
+        # for stage, decoder_layer in enumerate(self.decoder):
+        #     x_decoder = decoder_layer(x)
+        #     x = torch.cat([x_decoder, feature_maps[stage]], dim=1)
 
-        # x = rearrange(x, "B C H W -> (B H W) 1 C").contiguous()
-        # import pdb; pdb.set_trace()
-        # x = self.pre_s5(x)
-
-        x = rearrange(x, "(L B) C H W -> (B H W) L C", L=T).contiguous()
-
-        x, states = self.s5_block(x, states)
-
-        x = rearrange(
-                x, "(B H W) L C -> (L B) C H W", B=B, H=int(h_new), W=int(w_new)
-        ).contiguous()
-
-
-        last_layer_features = x
-
-        states = rearrange(states, "(B H W) C -> B C H W", H=h_new, W=w_new).contiguous()
-
-
-        for index, seg in enumerate(self.segmentation_decoder):
-            x_seg = seg(x)
-            x = torch.cat([x_seg, feature_maps[index]], dim=1)
-
-        seg_f = self.segmentation_head(x) 
         
-        # project the segmentation features to the same dimension as the states
-        seg_features = self.seg_proj_conv(F.adaptive_avg_pool2d(x, output_size=(6, 8)))
 
-        # states = states + seg_features # element-wise addition of the segmentation features
 
-        seg_f_detached = torch.sigmoid(seg_f.detach().clone())
+        # import pdb; pdb.set_trace()
 
-        seg_out = F.interpolate(seg_f, size=(H, W), mode='bilinear', align_corners=True)
-
-        x = last_layer_features
-
-        x = x + seg_features # element-wise addition of the segmentation features
-
-        x = x.view(T, B, -1)
+        # x = x.view(T, B, -1)
+        x = x.view(T, B, 192, 6, 8)
 
         delta_poses = list()
         current_poses = list()
@@ -199,8 +181,10 @@ class Event3DPoseNet(nn.Module):
 
 
         for i in range(T):
+            curr_x = x[i].flatten(2).permute(2, 0, 1)
+            decoded_x = self.query_decoder(curr_x)
             if i == 0:
-                current_pose = self.initial_pose_head(x[i])
+                current_pose = self.initial_pose_head(decoded_x)
                 if not kalman_filter.initialized:
                     kalman_filter.initialize(current_pose.reshape(B, -1))
                 previous_pose = current_pose
@@ -208,9 +192,9 @@ class Event3DPoseNet(nn.Module):
                 current_pose_old = current_pose
                 previous_pose_old = current_pose_old
             else:
-                abs_pose = self.initial_pose_head(x[i])
+                abs_pose = self.initial_pose_head(decoded_x)
                 previous_pose_emb = self.pose_embedding(previous_pose)
-                x_feat = torch.cat([x[i], previous_pose_emb], dim=1) # [batch_size, 9216 + 64]
+                x_feat = torch.cat([decoded_x, previous_pose_emb], dim=2) # [batch_size, 16, 256]
                 delta_pose = self.delta_head(x_feat)
 
                 kalman_filter.predict(u=delta_pose.reshape(B, -1))
@@ -240,7 +224,7 @@ class Event3DPoseNet(nn.Module):
             abs_poses.append(abs_pose)
 
 
-        seg_out = seg_out.view(T, B, 1, H, W)
+        # seg_out = seg_out.view(T, B, 1, H, W)
 
         delta_poses = torch.stack(delta_poses, dim=0)
         current_poses = torch.stack(current_poses, dim=0)
@@ -253,13 +237,11 @@ class Event3DPoseNet(nn.Module):
         # print(f"Total inference time for one iteration: {mean_time * 1000:.3f} ms")
         # print(f"Update frequency: {mean_freq:.3f} Hz")
 
-        states = states.detach()
+        # states = states.detach()
 
         return {
             'delta_pose': delta_poses,
-            'seg': seg_out,
-            'seg_feature': seg_f_detached,
-            's5_state': states,
+            's5_state': s5_states,
             'pose': current_poses,
             'abs_pose': abs_poses,
             'current_pose_old': current_poses_old

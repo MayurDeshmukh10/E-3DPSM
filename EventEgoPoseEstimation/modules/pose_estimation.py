@@ -109,6 +109,7 @@ class EventEgoPoseEstimation(LightningModule):
 
         self.training_type = training_type
 
+        # self.model = torch.compile(EgoHPE(cfg, **model_cfg), mode='reduce-overhead')
         self.model = EgoHPE(cfg, **model_cfg)
 
         self.input_channel = model_cfg['input_channel']
@@ -411,7 +412,14 @@ class EventEgoPoseEstimation(LightningModule):
 
         self.model.kalman_filter.reset()
 
-        inps, outputs, gt_hms, gt_poses, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index, pose_filename, vis_ja = compute_fn_v3(self.model, batch, None)
+        prev_s5_states = {
+            0: None,
+            1: None,
+            2: None,
+            3: None
+        }
+
+        inps, outputs, gt_hms, gt_poses, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index, pose_filename, vis_ja = compute_fn_v3(self.model, batch, prev_s5_states)
         # inps, outputs, gt_hms, gt_poses, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index, vis_ja = compute_fn_new(self.model, batch)
 
 
@@ -443,13 +451,14 @@ class EventEgoPoseEstimation(LightningModule):
         gt_poses = gt_poses  * 1000 # scale to mm
         pred_poses = outputs['abs_poses'] * 1000 # scale to mm
         pred_delta_poses = outputs['delta_poses'] * 1000 # scale to mm
-        pred_seg = outputs['seg']
+        # pred_seg = outputs['seg']
         valid_seg = valid_seg.view(self.temporal_steps, self.batch_size, 1, 1, 1)
         gt_delta_poses = gt_poses[1:, :, :, :] - gt_poses[:-1, :, :, :]
         # pred_heatmaps = outputs['heatmaps']
         
         s5_states = outputs['s5_states']
-        s5_states.detach()
+        for stage, s5_state in s5_states.items():
+            s5_state.detach()
 
 
         # for i in range(gt_poses.shape[0]):
@@ -457,14 +466,16 @@ class EventEgoPoseEstimation(LightningModule):
             # save_pose_images(pred_poses_2d.detach().cpu(), gt_poses_2d.detach().cpu(), '/CT/EventEgo3Dv2/work/EventEgo3Dv2/visualizations/sanity', mask_images=gt_seg.detach().cpu())
 
         loss_j3d_delta = self.criterions['delta_j3d'](pred_delta_poses, gt_delta_poses, vis_j3d[1:, :] * self.wgt_j3d_delta)
-        loss_seg = self.criterions['seg'](pred_seg, gt_seg, valid_seg * self.wgt_seg)
+        # loss_seg = self.criterions['seg'](pred_seg, gt_seg, valid_seg * self.wgt_seg)
         loss_j3d = self.criterions['j3d'](pred_poses, gt_poses, vis_j3d * self.wgt_j3d)
         loss_j2d = self.criterions['j2d'](pred_poses_2d, gt_poses_2d, vis_j2d * self.wgt_j2d)
         # loss_heatmaps = self.criterions['heatmap'](pred_heatmaps, gt_hms, vis_j2d * self.wgt_heatmap)
         loss_bone_length = self.criterions['bone_length'](pred_poses, gt_poses, vis_j3d * self.wgt_bone_length)
         loss_angle = self.criterions['bone_loss'](pred_poses, gt_poses, vis_ja * self.wgt_bone_angle, vis_ja * self.wgt_bone_length)
 
-        loss = loss_j3d + loss_j2d + loss_seg + loss_bone_length + loss_j3d_delta + loss_angle
+        loss_seg = 0
+
+        loss = loss_j3d + loss_j2d + loss_bone_length + loss_j3d_delta + loss_angle
 
         self._update_metrics(loss, loss_angle, loss_j3d_delta, loss_seg, loss_j3d, loss_j2d, 
                         loss_bone_length, gt_poses, pred_poses, valid_j3d, inps)
@@ -583,7 +594,12 @@ class EventEgoPoseEstimation(LightningModule):
 
         self.model.kalman_filter.reset()
 
-        s5_state = None
+        prev_s5_states = {
+            0: None,
+            1: None,
+            2: None,
+            3: None
+        }
 
         if vis == False:
 
@@ -602,7 +618,7 @@ class EventEgoPoseEstimation(LightningModule):
             batch_d = torch.utils.data._utils.collate.default_collate([data_batch])
 
 
-            inps, outputs, gt_hms, gt_abs_poses_og, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index, pose_filename = compute_fn_v4(self.model, batch_d, s5_state)
+            inps, outputs, gt_hms, gt_abs_poses_og, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index, pose_filename = compute_fn_v4(self.model, batch_d, prev_s5_states)
             # inps, outputs, gt_hms, gt_abs_poses_og, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index, vis_ja= compute_fn_new(self.model, batch)
             
 

@@ -44,7 +44,7 @@ model:
     temporal_steps: 20
     sample_step: 0 # not used currently
     batch_size: 3
-    workers: 4
+    workers: 14
     tbptt_steps: 20
     fixed_sequence_length: 20
 
@@ -69,7 +69,7 @@ model:
 # ckpt_path: /CT/EventEgo3Dv2/work/code_variations/dp_att_lkf_lnes/results/wandb_data/pre_att_lkf_lnes/epoch=31.ckpt
 # ckpt_path: /CT/EventEgo3Dv2/work/code_variations/dp_att_lkf_lnes/results/wandb_data/finetune_att_lkf_lnes_epoch_last/epoch=39.ckpt
 
-ckpt_path: /CT/EventEgo3Dv2/work/code_variations/dp_att_lkf_lnes/results/wandb_data/bidir_pre_att_lkf_lnes_20_ts/last.ckpt
+# ckpt_path: /CT/EventEgo3Dv2/work/code_variations/dp_att_lkf_lnes/results/wandb_data/bidir_pre_att_lkf_lnes_20_ts/last.ckpt
 
 trainer:
   accelerator: gpu
@@ -84,7 +84,7 @@ trainer:
   # strategy: ddp_find_unused_parameters_true
   # strategy: ddp
   fast_dev_run: false
-  num_sanity_val_steps: 0
+  num_sanity_val_steps: 50
   # limit_train_batches: 50
   limit_val_batches: 100
   # every_n_train_steps: 200

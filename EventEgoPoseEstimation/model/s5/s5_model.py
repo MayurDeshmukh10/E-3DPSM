@@ -32,6 +32,7 @@ def binary_operator(
     return A_j * A_i, torch.addcmul(b_j, A_j, b_i)
 
 
+# @torch.compiler.disable(recursive=False)
 def apply_ssm(
     Lambda_bars: torch.Tensor,
     B_bars,
@@ -303,6 +304,7 @@ class S5SSM(torch.nn.Module):
             C_bandlimited = torch.view_as_complex(self.C) * mask
             self.C = torch.nn.Parameter(torch.view_as_real(C_bandlimited))
 
+    
     def initial_state(self, batch_size: Optional[int]):
         batch_shape = (batch_size,) if batch_size is not None else ()
         _, C_tilde = self.get_BC_tilde()
@@ -422,6 +424,7 @@ class S5(torch.nn.Module):
             bandlimit=bandlimit,
         )
 
+    @torch.compiler.disable(recursive=True)
     def initial_state(self, batch_size: Optional[int] = None):
         return self.seq.initial_state(batch_size)
 
@@ -440,6 +443,8 @@ class GEGLU(torch.nn.Module):
     def forward(self, x):
         x, gates = x.chunk(2, dim=-1)
         return x * F.gelu(gates)
+
+
 
 
 class S5Block(torch.nn.Module):
@@ -479,6 +484,7 @@ class S5Block(torch.nn.Module):
         self.ff_norm = torch.nn.LayerNorm(dim)
         self.ff_dropout = torch.nn.Dropout(p=ff_dropout)
 
+    @torch.compiler.disable(recursive=True)
     def forward(self, x, states):
         # Standard transfomer-style block with GEGLU/Pre-LayerNorm
         fx = self.attn_norm(x)

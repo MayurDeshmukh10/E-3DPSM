@@ -11,7 +11,7 @@ model:
       image_size: [256, 192]
       batch_size: 6 #16 # 9 # individual batch size
 
-    lr: 0.0001
+    lr: 0.001
     lr_decay_epochs:
       - 92 #10
       - 97 #15
@@ -76,7 +76,7 @@ trainer:
         save_top_k: -1
         filename: "{epoch}"
         save_last: True
-        dirpath: ./results/wandb_data/bidir_finetune_pre_att_lkf_lnes_20_ts
+        dirpath: ./results/wandb_data/new_decoder_test
     # - class_path: EventEgoPoseEstimation.modules.pose_estimation.EvaluateCallback
     # - class_path: pytorch_lightning.callbacks.ModelCheckpoint
     #   init_args:
@@ -90,12 +90,12 @@ trainer:
   logger:
   - class_path: pytorch_lightning.loggers.WandbLogger
     init_args:
-      name: bidir_finetune_pre_att_lkf_lnes_20_ts # Experiment name on wandb
+      name: new_decoder_test # Experiment name on wandb
       project: EventEgo3Dv2  # Replace with your project name on wandb
-      save_dir: ./results/wandb_data/bidir_finetune_pre_att_lkf_lnes_20_ts  # Local directory to save wandb logs
+      save_dir: ./results/wandb_data/new_decoder_test  # Local directory to save wandb logs
       log_model: true  # Log the model checkpoints to wandb
       offline: false  # Set to true if you want to log offline and sync later
   - class_path: pytorch_lightning.loggers.TensorBoardLogger
     init_args:
       save_dir: ./results/
-      name: bidir_finetune_pre_att_lkf_lnes_20_ts  # TensorBoard experiment name
+      name: new_decoder_test  # TensorBoard experiment name

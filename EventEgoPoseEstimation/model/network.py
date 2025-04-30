@@ -84,14 +84,14 @@ class EgoHPE(nn.Module):
         s5_states = outs['s5_state']
         poses = outs['pose']
         delta_poses = outs['delta_pose']
-        seg_outs = outs['seg']
+        # seg_outs = outs['seg']
         all_abs_poses = outs['abs_pose']
         poses_old = outs['current_pose_old']
 
 
         outputs = {}
         outputs['abs_poses'] = poses  # previous pose + current delta + kalman filtering
-        outputs['seg'] = seg_outs
+        # outputs['seg'] = seg_outs
         outputs['delta_poses'] = delta_poses
         outputs['all_abs_poses'] = all_abs_poses # only current predicted abs pose
         outputs['poses_old'] = poses_old # previous pose + current delta + no kalman filtering
