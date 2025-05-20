@@ -334,6 +334,11 @@ class EventEgoPoseEstimation(LightningModule):
                 # cfg.DATASET.BG_AUG = False
                 test_dataset = self.real_dataset_root_path
                 test_preprocessed_input = self.real_preprocessed_input_path
+            elif self.training_type == 'EE3D-W-finetuning':
+                # cfg.DATASET.TYPE = 'Real'
+                # cfg.DATASET.BG_AUG = False
+                test_dataset = self.wild_dataset_root_path
+                test_preprocessed_input = self.wild_preprocessed_input_path
             else:
                 assert False, f"Invalid training type: {self.training_type}"
 
@@ -378,10 +383,10 @@ class EventEgoPoseEstimation(LightningModule):
     def val_dataloader(self):
         dataloader =  torch.utils.data.DataLoader(
             self.eval_dataset,
-            batch_size=1,
-            # batch_size=self.batch_size,
+            # batch_size=1,
+            batch_size=self.batch_size,
             # collate_fn=collate_variable_size,
-            collate_fn=lambda x: x[0],
+            # collate_fn=lambda x: x[0],
             num_workers=self.workers,
             pin_memory=True,
             drop_last=True
@@ -518,75 +523,81 @@ class EventEgoPoseEstimation(LightningModule):
         return loss
 
     
-    # def evaluate(self, model, batch, s5_state, batch_idx):
-    #     model.eval()
-    #     with torch.no_grad():
-    #         inps, outputs, gt_hms, gt_abs_poses_og, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index, pose_filename = compute_fn_v4(model, batch, s5_state)
+    def evaluate(self, model, batch, s5_state, batch_idx):
+        model.eval()
+        with torch.no_grad():
+            inps, outputs, gt_hms, gt_abs_poses_og, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index, pose_filename = compute_fn_v4(model, batch, s5_state)
 
-    #     pred_abs_poses = outputs['abs_poses'] * 1000 # scale to mm  (previous pose + current delta + kalman filtering)
-    #     gt_abs_poses = gt_abs_poses_og * 1000 # scale to mm
-    #     valid_j3d = valid_j3d
+        pred_abs_poses = outputs['abs_poses'] * 1000 # scale to mm  (previous pose + current delta + kalman filtering)
+        gt_abs_poses = gt_abs_poses_og * 1000 # scale to mm
+        valid_j3d = valid_j3d
 
-    #     s5_state = outputs['s5_states']
+        s5_state = outputs['s5_states']
 
-    #     val_loss_j3d = self.criterions['j3d'](pred_abs_poses.unsqueeze(0), gt_abs_poses.unsqueeze(0), vis_j3d.unsqueeze(0) * self.wgt_j3d)
-    #     self.j3d_loss_val.update(val_loss_j3d, inps.size(0))
+        val_loss_j3d = self.criterions['j3d'](pred_abs_poses.unsqueeze(0), gt_abs_poses.unsqueeze(0), vis_j3d.unsqueeze(0) * self.wgt_j3d)
+        self.j3d_loss_val.update(val_loss_j3d, inps.size(0))
 
-    #     # avg_acc, cnt, self.count = accuracy_with_vis(gt_abs_poses, pred_abs_poses, valid_j3d, batch_idx, outputs['abs_poses'].detach(), gt_abs_poses_og.detach(), inps, None, self.count)
-    #     avg_acc, cnt = accuracy(gt_abs_poses, pred_abs_poses, valid_j3d)
-    #     avg_jitter = compute_motion_jitter(pred_abs_poses, gt_abs_poses, valid_j3d)
-    #     self.jitter_j3d_val.update(avg_jitter, cnt)
-    #     self.acc_j3d_val.update(avg_acc, cnt)
+        # avg_acc, cnt, self.count = accuracy_with_vis(gt_abs_poses, pred_abs_poses, valid_j3d, batch_idx, outputs['abs_poses'].detach(), gt_abs_poses_og.detach(), inps, None, self.count)
+        avg_acc, cnt = accuracy(gt_abs_poses, pred_abs_poses, valid_j3d)
+        avg_jitter = compute_motion_jitter(pred_abs_poses, gt_abs_poses, valid_j3d)
+        self.jitter_j3d_val.update(avg_jitter, cnt)
+        self.acc_j3d_val.update(avg_acc, cnt)
 
-    #     self.all_preds_j3d.append(pred_abs_poses.detach().cpu())
-    #     self.all_gt_j3ds.append(gt_abs_poses.detach().cpu())
-    #     self.all_vis_j3d.append(valid_j3d.detach().cpu())
-    #     self.all_frame_indices.append(frame_index.detach().cpu())
+        self.all_preds_j3d.append(pred_abs_poses.detach().cpu())
+        self.all_gt_j3ds.append(gt_abs_poses.detach().cpu())
+        self.all_vis_j3d.append(valid_j3d.detach().cpu())
+        self.all_frame_indices.append(frame_index.detach().cpu())
 
-    #     return s5_state
+        return s5_state
     
     
-    # def eval_step(self, batch, batch_idx, prefix, vis=False):
-    #     self.model.eval()
+    def test_step_sequence(self, batch, batch_idx, prefix, vis=False):
+        self.model.eval()
 
-    #     # self.model.kalman_filter.reset()
+        # self.model.kalman_filter.reset()
 
-    #     # s5_state = None
+        # s5_state = None
 
-    #     # import pdb; pdb.set_trace()
+        # import pdb; pdb.set_trace()
 
 
-    #     if self.training_type in ['finetune']:
-    #         for idx in range(0, self.fixed_sequence_length, self.truncated_bptt_steps):
-    #             self.model.kalman_filter.reset()
-    #             s5_state = None
-    #             start = idx
-    #             end = start + self.truncated_bptt_steps
-    #             data_batch = batch[start:end]
-    #             batch_d = torch.utils.data._utils.collate.default_collate([data_batch])
+        if self.training_type in ['finetune', 'EE3D-W-finetuning']:
+            for idx in range(0, self.fixed_sequence_length, self.truncated_bptt_steps):
+                self.model.kalman_filter.reset()
+                # s5_state = None
+                prev_s5_states = {
+                    0: None,
+                    1: None,
+                    2: None,
+                    3: None
+                }
+                start = idx
+                end = start + self.truncated_bptt_steps
+                data_batch = batch[start:end]
+                batch_d = torch.utils.data._utils.collate.default_collate([data_batch])
 
-    #             self.s5_state = self.evaluate(self.model, batch_d, self.s5_state, batch_idx)
+                self.s5_state = self.evaluate(self.model, batch_d, prev_s5_states, batch_idx)
 
         
-    #     elif self.training_type == 'pretrain':
-    #         start = 0
-    #         end = start + len(batch)
-    #         data_batch = batch[start:end]
-    #         batch_d = torch.utils.data._utils.collate.default_collate([data_batch])
+        elif self.training_type == 'pretrain':
+            start = 0
+            end = start + len(batch)
+            data_batch = batch[start:end]
+            batch_d = torch.utils.data._utils.collate.default_collate([data_batch])
 
-    #         self.s5_state = self.evaluate(self.model, batch_d, self.s5_state, batch_idx)
+            self.s5_state = self.evaluate(self.model, batch_d, self.s5_state, batch_idx)
 
-    #     self.log('val_loss', self.j3d_loss_val.avg, sync_dist=True, batch_size=self.batch_size)
-    #     self.log('val_acc', self.acc_j3d_val.avg, sync_dist=True, batch_size=self.batch_size)
-    #     self.log('val_jitter', self.jitter_j3d_val.avg, sync_dist=True, batch_size=self.batch_size)
+        self.log('val_loss', self.j3d_loss_val.avg, sync_dist=True, batch_size=self.batch_size)
+        self.log('val_acc', self.acc_j3d_val.avg, sync_dist=True, batch_size=self.batch_size)
+        self.log('val_jitter', self.jitter_j3d_val.avg, sync_dist=True, batch_size=self.batch_size)
             
-    #     msg = 'Test: [{0}/{1}]\t' \
-    #         'MPJPE {acc.val:.4f} ({acc.avg:.4f})\t' \
-    #         'Jitter {jitter.val:.4f} ({jitter.avg:.4f})\t' \
-    #         'Val loss  {val_loss.val:.4f} ({val_loss.avg:.4f})\t'.format(
-    #             batch_idx, getattr(self.trainer, f"num_{prefix}_batches"),
-    #             acc=self.acc_j3d_val, val_loss=self.j3d_loss_val, jitter=self.jitter_j3d_val)
-    #     logger.info(msg)
+        msg = 'Test: [{0}/{1}]\t' \
+            'MPJPE {acc.val:.4f} ({acc.avg:.4f})\t' \
+            'Jitter {jitter.val:.4f} ({jitter.avg:.4f})\t' \
+            'Val loss  {val_loss.val:.4f} ({val_loss.avg:.4f})\t'.format(
+                batch_idx, getattr(self.trainer, f"num_{prefix}_batches"),
+                acc=self.acc_j3d_val, val_loss=self.j3d_loss_val, jitter=self.jitter_j3d_val)
+        logger.info(msg)
 
     
     def eval_step(self, batch, batch_idx, prefix, vis=False):
@@ -615,8 +626,8 @@ class EventEgoPoseEstimation(LightningModule):
             data_batch = batch[start:end]
 
 
-            batch_d = torch.utils.data._utils.collate.default_collate([data_batch])
-
+            # batch_d = torch.utils.data._utils.collate.default_collate([data_batch])
+            batch_d = batch
 
             inps, outputs, gt_hms, gt_abs_poses_og, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index, pose_filename = compute_fn_v4(self.model, batch_d, prev_s5_states)
             # inps, outputs, gt_hms, gt_abs_poses_og, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index, vis_ja= compute_fn_new(self.model, batch)
@@ -823,7 +834,7 @@ class EventEgoPoseEstimation(LightningModule):
         return self.eval_step(batch, batch_idx, "val")
 
     def test_step(self, batch, batch_idx):
-        return self.eval_step(batch, batch_idx, "test", vis=False)
+        return self.test_step_sequence(batch, batch_idx, "test", vis=False)
     
 
     # def on_train_batch_start(self, batch, batch_idx):
