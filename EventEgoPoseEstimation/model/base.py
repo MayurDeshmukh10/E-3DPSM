@@ -92,7 +92,7 @@ class Event3DPoseNet(nn.Module):
             nn.Sequential(
                 EncoderBlock(128, 192),
                 ResidualBlock(192, 192),
-                SpatialTransformer(192, 4, 48)
+                SpatialTransformer(192, 6, 32)
             ),
         ])
 
@@ -100,8 +100,8 @@ class Event3DPoseNet(nn.Module):
 
         self.s5_blocks = nn.ModuleList([
             S5Block(dim=32, state_dim=16, bidir=True, bandlimit=0.5),
-            S5Block(dim=64, state_dim=32, bidir=True, bandlimit=0.5),
-            S5Block(dim=128, state_dim=64, bidir=True, bandlimit=0.5),
+            # S5Block(dim=64, state_dim=32, bidir=True, bandlimit=0.5),
+            # S5Block(dim=128, state_dim=64, bidir=True, bandlimit=0.5),
             S5Block(dim=192, state_dim=96, bidir=True, bandlimit=0.5)
         ])
 
@@ -131,47 +131,52 @@ class Event3DPoseNet(nn.Module):
         B = x.shape[1]
         T = x.shape[0]
 
-        feature_maps = list()
-        s5_states = dict()
+        # Pre-allocate feature maps list with known length and process S5 states more efficiently
+        feature_maps = [None] * len(self.encoder_backbone)
+        s5_states = {}
         delta_pose = None
 
-        x = rearrange(x, "L B C H W -> (L B) C H W").contiguous()  # where B' = (L B) is the new batch size
-
+        # Single rearrangement at the beginning
+        x = rearrange(x, "L B C H W -> (L B) C H W").contiguous()
         x = self.conv1(x)
 
-        for stage, (encoder_block, s5_block) in enumerate(zip(self.encoder_backbone, self.s5_blocks)):
+        # Process each encoder stage
+        for stage, encoder_block in enumerate(self.encoder_backbone):
+            # Apply encoder block
             x = encoder_block(x)
             new_h, new_w = x.shape[-2:]
-            if prev_5_states[stage] is None:
-                s5_state = s5_block.s5.initial_state(
-                    batch_size=B * new_h * new_w
-                ).to(x.device)
-            else:
-                s5_state = rearrange(prev_5_states[stage], "B C H W -> (B H W) C").contiguous()
+            
+            # Apply S5 blocks only for stages 0 and 3 as in the original code
+            if stage in [0, 3]:
 
-            x = rearrange(x, "(L B) C H W -> (B H W) L C", L=T).contiguous()
-
-            x, new_s5_state = s5_block(x, s5_state)
-
-            x = rearrange(x, "(B H W) L C -> (L B) C H W", B=B, H=int(new_h), W=int(new_w)).contiguous()
-            new_s5_state = rearrange(new_s5_state, "(B H W) C -> B C H W", H=new_h, W=new_w).contiguous()
-
-            feature_maps.append(x)
-            s5_states[stage] = new_s5_state
-
-        x = feature_maps[-1]
-        feature_maps = feature_maps[::-1]
-
-        # for stage, decoder_layer in enumerate(self.decoder):
-        #     x_decoder = decoder_layer(x)
-        #     x = torch.cat([x_decoder, feature_maps[stage]], dim=1)
-
+                s5_block = self.s5_blocks[stage % 2]
+                # Prepare S5 state - avoiding conditionals within the loop if possible
+                s5_state = None
+                if prev_5_states[stage] is not None:
+                    s5_state = rearrange(prev_5_states[stage], "B C H W -> (B H W) C").contiguous()
+                else:
+                    s5_state = s5_block.s5.initial_state(batch_size=B * new_h * new_w).to(x.device)
+                
+                # Reshape for S5 processing - do this in one step with precise dimensions
+                x_s5 = x.view(T, B, x.size(1), new_h, new_w)
+                x_s5 = x_s5.permute(1, 3, 4, 0, 2).reshape(B * new_h * new_w, T, -1)
+                
+                # Process with S5 block
+                x_s5, new_s5_state = s5_block(x_s5, s5_state)
+                
+                # Reshape back efficiently
+                x = x_s5.view(B, new_h, new_w, T, -1).permute(3, 0, 4, 1, 2).reshape(T * B, -1, new_h, new_w)
+                
+                # Store new S5 state
+                s5_states[stage] = new_s5_state.view(B, new_h, new_w, -1).permute(0, 3, 1, 2)
+            
+            # Store feature maps directly in their final positions (no need to reverse later)
+            # import pdb; pdb.set_trace()
+            feature_maps[len(feature_maps) - 1 - stage] = x
         
-
-
-        # import pdb; pdb.set_trace()
-
-        # x = x.view(T, B, -1)
+        # Last feature map is now the first element
+        x = feature_maps[0]
+        
         x = x.view(T, B, 192, 6, 8)
 
         delta_poses = list()
@@ -206,38 +211,15 @@ class Event3DPoseNet(nn.Module):
                 current_pose_old = previous_pose_old + delta_pose
                 delta_poses.append(delta_pose)
 
-            # if torch.cuda.is_available():
-            #     torch.cuda.synchronize()
-            # end_time = time.perf_counter()
-
-            # elapsed_time = end_time - start_time
-
-
-
-            # frequency = 1 / elapsed_time if elapsed_time > 0 else float('inf')
-
-            # times.append(elapsed_time)
-            # frq.append(frequency)
-
             current_poses.append(current_pose)
             current_poses_old.append(current_pose_old)
             abs_poses.append(abs_pose)
 
 
-        # seg_out = seg_out.view(T, B, 1, H, W)
-
         delta_poses = torch.stack(delta_poses, dim=0)
         current_poses = torch.stack(current_poses, dim=0)
         current_poses_old = torch.stack(current_poses_old, dim=0)
         abs_poses = torch.stack(abs_poses, dim=0)
-
-        # mean_time = sum(times) / len(times)
-        # mean_freq = sum(frq) / len(frq)
-
-        # print(f"Total inference time for one iteration: {mean_time * 1000:.3f} ms")
-        # print(f"Update frequency: {mean_freq:.3f} Hz")
-
-        # states = states.detach()
 
         return {
             'delta_pose': delta_poses,

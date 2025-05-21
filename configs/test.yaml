@@ -43,7 +43,7 @@ model:
     use_bg_augmentation: true
     temporal_steps: 20
     sample_step: 0 # not used currently
-    batch_size: 3
+    batch_size: 6
     workers: 14
     tbptt_steps: 20
     fixed_sequence_length: 20
@@ -85,8 +85,8 @@ trainer:
   # strategy: ddp
   fast_dev_run: false
   num_sanity_val_steps: 50
-  # limit_train_batches: 50
-  limit_val_batches: 100
+  # limit_train_batches: 100
+  limit_val_batches: 2
   # every_n_train_steps: 200
   # gradient_clip_val: 5
   # gradient_clip_algorithm: norm

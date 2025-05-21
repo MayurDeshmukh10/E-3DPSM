@@ -1,6 +1,8 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from mmcv.ops.multi_scale_deform_attn import MultiScaleDeformableAttention
+import math
 
 class ResidualBlock(nn.Module):
     def __init__(self, infilters, filters, kernel_size=3, stride=1, padding=1):
@@ -39,46 +41,71 @@ class EncoderBlock(nn.Module):
         # return x, p
         return p
 
-class SelfAttention(nn.Module):
+class DeformableAttention(nn.Module):
     def __init__(self, n_heads, d_head):
-        super(SelfAttention, self).__init__()
-        self.to_q = nn.Linear(n_heads * d_head, n_heads * d_head, bias=False)
-        self.to_k = nn.Linear(n_heads * d_head, n_heads * d_head, bias=False)
-        self.to_v = nn.Linear(n_heads * d_head, n_heads * d_head, bias=False)
-        
-        self.scale = d_head ** -0.5
+        super(DeformableAttention, self).__init__()
+        self.embed_dims = n_heads * d_head
         self.num_heads = n_heads
-        self.head_size = d_head
-        self.to_out = nn.Linear(n_heads * d_head, n_heads * d_head)
-
+        self.output_proj = nn.Linear(self.embed_dims, self.embed_dims)
+        
+        # Parameters for deformable attention
+        self.num_levels = 1
+        self.num_points = 8
+        
+        # Create MultiScaleDeformableAttention instance
+        self.deform_attn = MultiScaleDeformableAttention(
+            embed_dims=self.embed_dims,
+            num_heads=self.num_heads,
+            num_levels=self.num_levels,
+            num_points=self.num_points,
+            batch_first=True,
+            im2col_step=1  # Set to 1 to support any batch size
+        )
+        
+        self.value_proj = nn.Linear(self.embed_dims, self.embed_dims)
+        
     def forward(self, inputs):
         assert isinstance(inputs, list)
         if len(inputs) == 1:
             inputs.append(None)
-
-        x, context = inputs           
+            
+        x, context = inputs
         context = x if context is None else context
         
-        # Project inputs to queries, keys, and values
-        q = self.to_q(x)
-        k = self.to_k(context)
-        v = self.to_v(context)
-
-        # Reshape for multi-head attention
-        q = q.view(q.shape[0], q.shape[1], self.num_heads, self.head_size).permute(0, 2, 1, 3).contiguous()
-        k = k.view(k.shape[0], k.shape[1], self.num_heads, self.head_size).permute(0, 2, 3, 1).contiguous()
-        v = v.view(v.shape[0], v.shape[1], self.num_heads, self.head_size).permute(0, 2, 1, 3).contiguous()
-
-        # Scaled dot-product attention
-        score = torch.matmul(q, k) * self.scale
-        weights = F.softmax(score, dim=-1)
-        attention = torch.matmul(weights, v)
-
-        # Reshape back and apply output linear layer
-        attention = attention.permute(0, 2, 1, 3).contiguous()
-        h_ = attention.view(attention.shape[0], -1, self.num_heads * self.head_size)
-        return self.to_out(h_)
-
+        # For deformable attention, input needs to be arranged as [B, L, C]
+        B, L, _ = x.shape
+        
+        # Project value
+        value = self.value_proj(context)
+        
+        # Create reference points - for sequence data, use a simple grid in normalized space [0, 1]
+        reference_points = torch.zeros((B, L, self.num_levels, 2), device=x.device)
+        # Set reference points to center (0.5, 0.5)
+        reference_points += 0.5
+        
+        # Create spatial shapes info
+        spatial_shapes = torch.tensor([[L, 1]], device=x.device, dtype=torch.long)
+        level_start_index = torch.tensor([0], device=x.device, dtype=torch.long)
+        
+        # Use the MultiScaleDeformableAttention module to compute attention
+        if L <= self.num_points:
+            # For very short sequences, just use a simpler approach
+            output = value
+        else:
+            # Use the deformable attention module
+            output = self.deform_attn(
+                query=x,
+                key=None,  # key is generated inside the module
+                value=value,
+                query_pos=None,
+                key_padding_mask=None,
+                reference_points=reference_points,
+                spatial_shapes=spatial_shapes,
+                level_start_index=level_start_index
+            )
+            
+        # Apply output projection if needed
+        return self.output_proj(output) if hasattr(self, 'output_proj') else output
 
 class SpatialTransformer(nn.Module):
     def __init__(self, channels, n_heads, d_head):
@@ -117,7 +144,7 @@ class BasicTransformerBlock(nn.Module):
     def __init__(self, dim, n_heads, d_head):
         super(BasicTransformerBlock, self).__init__()
         self.norm1 = nn.LayerNorm(dim)
-        self.attn1 = SelfAttention(n_heads, d_head)
+        self.attn1 = DeformableAttention(n_heads, d_head)
 
         self.norm3 = nn.LayerNorm(dim)
         self.geglu = GEGLU(dim, dim * 4)
