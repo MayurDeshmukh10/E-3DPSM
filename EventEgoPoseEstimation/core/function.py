@@ -527,6 +527,7 @@ def compute_fn_v4(model, batch, s5_state, prev_buffer=None, prev_key=None, batch
     use_bg = []
     bg_data = []
     vis_ja = []
+    valid_joints = []
     for (data, meta) in batch:
         inp = data['x']
         inps.append(inp[None, ...])    
@@ -543,6 +544,7 @@ def compute_fn_v4(model, batch, s5_state, prev_buffer=None, prev_key=None, batch
         valid_seg_ = meta['valid_seg']
         frame_index_ = meta['frame_index']
         filename_ = meta['pose_filename']
+        valid_joints_ = meta['valid_joints']
         # use_bg_ = meta['use_bg']
         # bg_data_ = meta['bg_data']
         # vis_ja_ = meta['vis_ja']
@@ -559,6 +561,8 @@ def compute_fn_v4(model, batch, s5_state, prev_buffer=None, prev_key=None, batch
         valid_j3d.append(valid_j3d_)
         valid_seg.append(valid_seg_)
         filename.append(filename_)
+
+        valid_joints.append(valid_joints_)
 
         # use_bg.append(use_bg_)
         # bg_data.append(bg_data_)
@@ -580,6 +584,7 @@ def compute_fn_v4(model, batch, s5_state, prev_buffer=None, prev_key=None, batch
     valid_j3d = torch.stack(valid_j3d).cuda()
     valid_seg = torch.stack(valid_seg).cuda()
     frame_index = torch.stack(frame_index)
+    valid_joints = torch.stack(valid_joints).cuda()
 
     # use_bg = torch.stack(use_bg)
     # bg_data = torch.stack(bg_data).cuda().permute(0, 1, 4, 2, 3)
@@ -597,7 +602,7 @@ def compute_fn_v4(model, batch, s5_state, prev_buffer=None, prev_key=None, batch
     outputs = model(inps, s5_state, augmentation_data=augmentation_data)
     
     T, B, C, H, W = inps.shape
-    return inps.view(T * B, C, H, W), outputs, gt_hms, gt_j3d, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index, filename
+    return inps.view(T * B, C, H, W), outputs, gt_hms, gt_j3d, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index, filename, valid_joints
 
 def percentile(t, q):
     B, C, H, W = t.shape

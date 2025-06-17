@@ -72,6 +72,8 @@ class SingleSequenceDataset(Joints3DDataset):
 
         if ego_to_global_space is None:
             ego_to_global_space = np.eye(4)
+        
+        valid_joints = item['valid_joints']
 
         # rgb_indexes.append(int(rgb_frame_index))
         # ego_j3ds.append(j3d.astype(np.float32))
@@ -92,7 +94,8 @@ class SingleSequenceDataset(Joints3DDataset):
                 'vis_ja': vis_ja.astype(np.float32),
                 'segmentation_mask': segmentation_mask,
                 'ego_to_global_space': ego_to_global_space,
-                'rgb_frame_index': int(rgb_frame_index)
+                'rgb_frame_index': int(rgb_frame_index),
+                'valid_joints': valid_joints
             }
     
     def __init__(self, cfg, preprocessed_item_path, dataset_item_path, is_train, split, temporal_bins, augmentation=False):

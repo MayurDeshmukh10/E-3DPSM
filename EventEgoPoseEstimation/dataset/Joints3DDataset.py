@@ -54,6 +54,7 @@ class Joints3DDataset(Dataset):
         vis_j3d = anno['vis_j3d']
         vis_ja = anno['vis_ja']
         valid_seg = float(anno['valid_seg'])
+        valid_joints = anno['valid_joints']
         
         img_h, img_w = segmentation_mask.shape[:2]
 
@@ -162,7 +163,8 @@ class Joints3DDataset(Dataset):
             'scale_y': sy,
             'valid_seg': valid_seg,
             'ego_to_global_space': ego_to_global_space,
-            'pose_filename': pose_filename
+            'pose_filename': pose_filename,
+            'valid_joints': valid_joints
         }
 
         return {'x': inp, 'hms': target, 'weight': vis_j2d, 'j3d': j3d, 'j2d': j2d, 'segmentation_mask': segmentation_mask}, meta
@@ -295,12 +297,15 @@ class Joints3DDataset(Dataset):
         return name_values, MPJPE
     
     @classmethod
-    def evaluate_joints(cls, cfg, all_gt_j3ds, all_preds_j3d, all_vis_j3d):
+    def evaluate_joints(cls, cfg, all_gt_j3ds, all_preds_j3d, all_vis_j3d, all_valid_joints):
         min_length = min(len(all_preds_j3d), len(all_gt_j3ds), len(all_vis_j3d))
         all_gt_j3ds = all_gt_j3ds[:min_length]
         all_preds_j3d = all_preds_j3d[:min_length]
         all_vis_j3d = all_vis_j3d[:min_length]
+        all_valid_joints = all_valid_joints[:min_length]
+        all_valid_joints = np.expand_dims(all_valid_joints, axis=-1)
         errors, errors_pa = compute_3d_errors_batch(all_gt_j3ds, all_preds_j3d, all_vis_j3d)
+        errors_occl, errors_pa_occl = compute_3d_errors_batch(all_gt_j3ds * all_valid_joints, all_preds_j3d * all_valid_joints, all_vis_j3d)
         
         MPJPE = np.mean(errors)
         PAMPJPE = np.mean(errors_pa)
@@ -315,6 +320,7 @@ class Joints3DDataset(Dataset):
             PAMPJPE_std = 0
 
         name_values = []
+        name_values_occl = []
 
         heatmap_sequence = ["Head", # 0
                             "Neck", # 1
@@ -343,9 +349,21 @@ class Joints3DDataset(Dataset):
         name_values.append(('PAMPJPE', PAMPJPE))
         name_values.append(('PAMPJPE_std', PAMPJPE_std))
 
-        name_values = OrderedDict(name_values)
+        for i, joint_name in enumerate(heatmap_sequence):
+            name_values_occl.append((f'{joint_name}_MPJPE', errors_occl[i]))
+        name_values_occl.append(('MPJPE', MPJPE))
+        name_values_occl.append(('MPJPE_std', MPJPE_std))
 
-        return name_values, MPJPE
+        for i, joint_name in enumerate(heatmap_sequence):
+            name_values_occl.append((f'{joint_name}_PAMPJPE', errors_pa_occl[i]))
+        name_values_occl.append(('PAMPJPE', PAMPJPE))
+        name_values_occl.append(('PAMPJPE_std', PAMPJPE_std))
+
+        name_values = OrderedDict(name_values)
+        name_values_occl = OrderedDict(name_values_occl)
+
+
+        return name_values, name_values_occl, MPJPE
 
     def generate_location_maps(self, j2d, j3d, vis_j3d):
         '''

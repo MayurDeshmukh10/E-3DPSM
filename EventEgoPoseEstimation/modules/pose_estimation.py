@@ -165,10 +165,12 @@ class EventEgoPoseEstimation(LightningModule):
         self.acc_j3d_val = AverageMeter()
         self.jitter_j3d_val = AverageMeter()
         self.j3d_loss_val = AverageMeter()
+        self.acc_occl_val = AverageMeter()
         self.all_gt_j3ds = []
         self.all_preds_j3d = []
         self.all_vis_j3d = []
         self.all_frame_indices = []
+        self.all_occluded_joints = []
 
         self.global_steps = 0
         self.global_val_steps = 0
@@ -526,7 +528,7 @@ class EventEgoPoseEstimation(LightningModule):
     def evaluate(self, model, batch, s5_state, batch_idx):
         model.eval()
         with torch.no_grad():
-            inps, outputs, gt_hms, gt_abs_poses_og, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index, pose_filename = compute_fn_v4(model, batch, s5_state)
+            inps, outputs, gt_hms, gt_abs_poses_og, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index, pose_filename, valid_joints = compute_fn_v4(model, batch, s5_state)
 
         pred_abs_poses = outputs['abs_poses'] * 1000 # scale to mm  (previous pose + current delta + kalman filtering)
         gt_abs_poses = gt_abs_poses_og * 1000 # scale to mm
@@ -539,13 +541,16 @@ class EventEgoPoseEstimation(LightningModule):
 
         # avg_acc, cnt, self.count = accuracy_with_vis(gt_abs_poses, pred_abs_poses, valid_j3d, batch_idx, outputs['abs_poses'].detach(), gt_abs_poses_og.detach(), inps, None, self.count)
         avg_acc, cnt = accuracy(gt_abs_poses, pred_abs_poses, valid_j3d)
+        avg_acc_occlusion, cnt_occl = accuracy(gt_abs_poses, pred_abs_poses, (1 - valid_joints).unsqueeze(-1))
         avg_jitter = compute_motion_jitter(pred_abs_poses, gt_abs_poses, valid_j3d)
         self.jitter_j3d_val.update(avg_jitter, cnt)
         self.acc_j3d_val.update(avg_acc, cnt)
+        self.acc_occl_val.update(avg_acc_occlusion, cnt_occl)
 
         self.all_preds_j3d.append(pred_abs_poses.detach().cpu())
         self.all_gt_j3ds.append(gt_abs_poses.detach().cpu())
         self.all_vis_j3d.append(valid_j3d.detach().cpu())
+        self.all_occluded_joints.append((1 - valid_joints).cpu())
         self.all_frame_indices.append(frame_index.detach().cpu())
 
         return s5_state
@@ -590,13 +595,16 @@ class EventEgoPoseEstimation(LightningModule):
         self.log('val_loss', self.j3d_loss_val.avg, sync_dist=True, batch_size=self.batch_size)
         self.log('val_acc', self.acc_j3d_val.avg, sync_dist=True, batch_size=self.batch_size)
         self.log('val_jitter', self.jitter_j3d_val.avg, sync_dist=True, batch_size=self.batch_size)
+        self.log('val_acc_occl', self.acc_occl_val.avg, sync_dist=True, batch_size=self.batch_size)
+
             
         msg = 'Test: [{0}/{1}]\t' \
             'MPJPE {acc.val:.4f} ({acc.avg:.4f})\t' \
             'Jitter {jitter.val:.4f} ({jitter.avg:.4f})\t' \
-            'Val loss  {val_loss.val:.4f} ({val_loss.avg:.4f})\t'.format(
+            'Val loss  {val_loss.val:.4f} ({val_loss.avg:.4f})\t' \
+            'Occlusion MPJPE  {acc_occl.val:.4f} ({acc_occl.avg:.4f})\t'.format(
                 batch_idx, getattr(self.trainer, f"num_{prefix}_batches"),
-                acc=self.acc_j3d_val, val_loss=self.j3d_loss_val, jitter=self.jitter_j3d_val)
+                acc=self.acc_j3d_val, val_loss=self.j3d_loss_val, jitter=self.jitter_j3d_val, acc_occl=self.acc_occl_val)
         logger.info(msg)
 
     
@@ -629,7 +637,7 @@ class EventEgoPoseEstimation(LightningModule):
             # batch_d = torch.utils.data._utils.collate.default_collate([data_batch])
             batch_d = batch
 
-            inps, outputs, gt_hms, gt_abs_poses_og, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index, pose_filename = compute_fn_v4(self.model, batch_d, prev_s5_states)
+            inps, outputs, gt_hms, gt_abs_poses_og, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index, pose_filename, valid_joints = compute_fn_v4(self.model, batch_d, prev_s5_states)
             # inps, outputs, gt_hms, gt_abs_poses_og, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index, vis_ja= compute_fn_new(self.model, batch)
             
 
@@ -910,8 +918,10 @@ class EventEgoPoseEstimation(LightningModule):
         self.all_gt_j3ds = []
         self.all_preds_j3d = []
         self.all_vis_j3d = []
+        self.all_occluded_joints = []
         self.all_frame_indices = []
         self.acc_j3d_val.reset()
+        self.acc_occl_val.reset()
         self.jitter_j3d_val.reset()
         self.j3d_loss_val.reset()
 
@@ -1093,6 +1103,7 @@ class EvaluateCallback(Callback):
         all_gt_j3ds = np.concatenate(model.all_gt_j3ds, axis=0)
         all_vis_j3d = np.concatenate(model.all_vis_j3d, axis=0)
         all_frame_indices = np.concatenate(model.all_frame_indices, axis=0)
+        all_occluded_joints = np.concatenate(model.all_occluded_joints, axis=0)
 
         # np.save("all_preds_j3d.npy", all_preds_j3d)
         # np.save("all_gt_j3ds.npy", all_gt_j3ds)
@@ -1112,7 +1123,7 @@ class EvaluateCallback(Callback):
             else:
                 _print_name_value(name_values, model_name)
 
-        name_values, _ = dataset.evaluate_joints(cfg, all_gt_j3ds=all_gt_j3ds, all_preds_j3d=all_preds_j3d, all_vis_j3d=all_vis_j3d)
+        name_values, name_values_occl, _ = dataset.evaluate_joints(cfg, all_gt_j3ds=all_gt_j3ds, all_preds_j3d=all_preds_j3d, all_vis_j3d=all_vis_j3d, all_valid_joints=all_occluded_joints)
         model_name = cfg.MODEL.NAME
         print("Error Per Joints : ")
         if isinstance(name_values, list):
@@ -1120,6 +1131,13 @@ class EvaluateCallback(Callback):
                 _print_name_value(name_value, model_name)
         else:
             _print_name_value(name_values, model_name)
+
+        print("Occlusion Error Per Joints : ")
+        if isinstance(name_values_occl, list):
+            for name_value in name_values_occl:
+                _print_name_value(name_value, model_name)
+        else:
+            _print_name_value(name_values_occl, model_name)
 
         
         print("Avg Jitter e_smooth : ", model.jitter_j3d_val.avg)

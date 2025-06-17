@@ -88,6 +88,8 @@ class SingleSequenceDataset(Joints3DDataset):
             valid_seg = item['valid_seg']
         rgb_frame_index = item['rgb_frame_index']
 
+        valid_joints = item['valid_joints']
+
         if j3d is None or j2d is None:
             vis_j2d = np.zeros((self.num_joints, 2))
             vis_j3d = np.zeros((self.num_joints, 3))
@@ -111,7 +113,8 @@ class SingleSequenceDataset(Joints3DDataset):
             'vis_ja': vis_ja.astype(np.float32),
             'segmentation_mask': segmentation_mask,
             'ego_to_global_space': ego_to_global_space,
-            'rgb_frame_index': int(rgb_frame_index)
+            'rgb_frame_index': int(rgb_frame_index),
+            'valid_joints': valid_joints
         }
     
     def __init__(self, 
