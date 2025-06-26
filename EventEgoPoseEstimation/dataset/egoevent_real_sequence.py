@@ -104,7 +104,7 @@ class RealEventSequenceStream(Dataset):
             'valid_seg': False,
             'ego_j3d': None, 
             'ego_j2d': None, 
-            'valid_joints': None,
+            'valid_joints': np.zeros(16, dtype=np.float32),
             'segmentation_mask': np.zeros((self.height, self.width), dtype=np.uint8)
         }
         
