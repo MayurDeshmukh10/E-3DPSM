@@ -10,12 +10,16 @@ import torch.optim as optim
 import torch.utils.data
 import torch.utils.data.distributed
 
+import uuid
+
 from pytorch_lightning import LightningModule
 from pytorch_lightning.strategies import ParallelStrategy
 from pytorch_lightning.callbacks import Callback
 
 from torch.optim.lr_scheduler import MultiStepLR
 import torch.distributed as dist
+
+from PIL import Image
 
 import numpy as np
 
@@ -171,6 +175,8 @@ class EventEgoPoseEstimation(LightningModule):
         self.all_vis_j3d = []
         self.all_frame_indices = []
         self.all_occluded_joints = []
+        self.total_count = 0
+        self.per_joint_count = torch.tensor([ 0.,  0.,  0.,  0.,  0.,  0.,  0.,  0.,  0., 0., 0.,  0.,  0., 0., 0.,  0.], device='cuda:0')
 
         self.global_steps = 0
         self.global_val_steps = 0
@@ -524,6 +530,20 @@ class EventEgoPoseEstimation(LightningModule):
         
         return loss
 
+    def visualize(self, lnes: np.ndarray):
+        # if torch.Tensor, convert
+        if isinstance(lnes, torch.Tensor):
+            # assume shape (C, H, W)
+            lnes = lnes.permute(1, 2, 0).detach().cpu().numpy()
+        lnes = (lnes.copy() * 255).astype(np.uint8)
+                    
+        h, w = lnes.shape[:2]
+        b = lnes[..., :1]      # channel 0 → blue
+        r = lnes[..., 1:]      # channel 1 → red
+        g = np.zeros((h, w, 1), dtype=np.uint8)  # green = 0
+
+        rgb = np.concatenate([r, g, b], axis=2)
+        return rgb
     
     def evaluate(self, model, batch, s5_state, batch_idx):
         model.eval()
@@ -542,6 +562,26 @@ class EventEgoPoseEstimation(LightningModule):
         # avg_acc, cnt, self.count = accuracy_with_vis(gt_abs_poses, pred_abs_poses, valid_j3d, batch_idx, outputs['abs_poses'].detach(), gt_abs_poses_og.detach(), inps, None, self.count)
         avg_acc, cnt = accuracy(gt_abs_poses, pred_abs_poses, valid_j3d)
         avg_acc_occlusion, cnt_occl = accuracy(gt_abs_poses, pred_abs_poses, (1 - valid_joints).unsqueeze(-1))
+        # qq = (1 - valid_joints).squeeze(1)
+        # mask = torch.zeros(qq.size(0), dtype=torch.bool, device=qq.device)
+        # joint_idxs = [0, 1]
+        # for j in joint_idxs:
+        #     mask |= (qq[:, j] == 1)
+
+        # selected_inps = inps[mask]
+
+        # for idx, sample in enumerate(selected_inps):
+        #     # sample: tensor (2, H, W)
+        #     rand_id = uuid.uuid4().hex[:8]
+        #     img_np = self.visualize(sample)           # → (H, W, 3) uint8
+        #     img = Image.fromarray(img_np)        # PIL Image
+        #     filename = f"sample_{idx:02d}_{rand_id}.png"
+        #     img.save(os.path.join('/CT/EventEgo3Dv2/work/code_variations/dp_att_lkf_lnes_update_deform_att/occl_images/', filename))
+
+
+        self.per_joint_count += (1 - valid_joints).squeeze(1).sum(dim=0)
+        self.total_count += valid_joints.shape[0] * valid_joints.shape[1]
+
         avg_jitter = compute_motion_jitter(pred_abs_poses, gt_abs_poses, valid_j3d)
         self.jitter_j3d_val.update(avg_jitter, cnt)
         self.acc_j3d_val.update(avg_acc, cnt)
@@ -1141,3 +1181,6 @@ class EvaluateCallback(Callback):
 
         
         print("Avg Jitter e_smooth : ", model.jitter_j3d_val.avg)
+
+        print("Per joint count : ", model.per_joint_count)
+        print("Total count : ", model.total_count)

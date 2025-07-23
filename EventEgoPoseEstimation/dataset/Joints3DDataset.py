@@ -6,7 +6,7 @@ from torch.utils.data import Dataset
 from collections import OrderedDict
 from EventEgoPoseEstimation.dataset import transforms
 
-from EventEgoPoseEstimation.dataset.metrics import compute_3d_errors_batch
+from EventEgoPoseEstimation.dataset.metrics import compute_3d_errors_batch, compute_3d_errors_batch_new
 
 
 logger = logging.getLogger(__name__)
@@ -304,20 +304,39 @@ class Joints3DDataset(Dataset):
         all_vis_j3d = all_vis_j3d[:min_length]
         all_valid_joints = all_valid_joints[:min_length]
         all_valid_joints = np.expand_dims(all_valid_joints, axis=-1)
-        errors, errors_pa = compute_3d_errors_batch(all_gt_j3ds, all_preds_j3d, all_vis_j3d)
-        errors_occl, errors_pa_occl = compute_3d_errors_batch(all_gt_j3ds * all_valid_joints, all_preds_j3d * all_valid_joints, all_vis_j3d)
-        
-        MPJPE = np.mean(errors)
-        PAMPJPE = np.mean(errors_pa)
 
-        # TODO: Remove try-except block if this works.
-        try:
-            MPJPE_std = np.std(errors)
-            PAMPJPE_std = np.std(errors_pa)
-        except Exception as e:
-            print(f"Error: {e}")
-            MPJPE_std = 0
-            PAMPJPE_std = 0
+        # errors, errors_pa = compute_3d_errors_batch(all_gt_j3ds, all_preds_j3d, all_vis_j3d)
+        # errors_occl, errors_pa_occl = compute_3d_errors_batch(all_gt_j3ds * all_valid_joints, all_preds_j3d * all_valid_joints, all_vis_j3d)
+        
+
+        metrics = compute_3d_errors_batch_new(all_gt_j3ds, all_preds_j3d, all_vis_j3d)
+        occl_metrics = compute_3d_errors_batch_new(all_gt_j3ds * all_valid_joints, all_preds_j3d * all_valid_joints, all_vis_j3d)
+
+
+        errors = metrics['joint_means']
+        errors_pa = metrics['joint_means_pa']
+        errors_occl = occl_metrics['joint_means']
+        errors_pa_occl = occl_metrics['joint_means_pa']
+        MPJPE = metrics['mpjpe_mean']
+        PAMPJPE = metrics['pa_mean']
+        MPJPE_std = metrics['mpjpe_std']
+        PAMPJPE_std = metrics['pa_std']
+        MPJPE_occl = occl_metrics['mpjpe_mean']
+        PAMPJPE_occl = occl_metrics['pa_mean']
+        MPJPE_occl_std = occl_metrics['mpjpe_std']
+        PAMPJPE_occl_std = occl_metrics['pa_std']
+
+        # MPJPE = np.mean(errors)
+        # PAMPJPE = np.mean(errors_pa)
+
+        # # TODO: Remove try-except block if this works.
+        # try:
+        #     MPJPE_std = np.std(errors)
+        #     PAMPJPE_std = np.std(errors_pa)
+        # except Exception as e:
+        #     print(f"Error: {e}")
+        #     MPJPE_std = 0
+        #     PAMPJPE_std = 0
 
         name_values = []
         name_values_occl = []
@@ -351,13 +370,13 @@ class Joints3DDataset(Dataset):
 
         for i, joint_name in enumerate(heatmap_sequence):
             name_values_occl.append((f'{joint_name}_MPJPE', errors_occl[i]))
-        name_values_occl.append(('MPJPE', MPJPE))
-        name_values_occl.append(('MPJPE_std', MPJPE_std))
+        name_values_occl.append(('MPJPE', MPJPE_occl))
+        name_values_occl.append(('MPJPE_std', MPJPE_occl_std))
 
         for i, joint_name in enumerate(heatmap_sequence):
             name_values_occl.append((f'{joint_name}_PAMPJPE', errors_pa_occl[i]))
-        name_values_occl.append(('PAMPJPE', PAMPJPE))
-        name_values_occl.append(('PAMPJPE_std', PAMPJPE_std))
+        name_values_occl.append(('PAMPJPE', PAMPJPE_occl))
+        name_values_occl.append(('PAMPJPE_std', PAMPJPE_occl_std))
 
         name_values = OrderedDict(name_values)
         name_values_occl = OrderedDict(name_values_occl)

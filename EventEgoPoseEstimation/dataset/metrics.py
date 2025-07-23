@@ -123,6 +123,41 @@ def align_by_pelvis_batch(joints, return_pelvis=False):
 #     return errors, errors_pa
 
 
+def compute_3d_errors_batch_new(gt3ds, preds, valid_j3d):
+    valid_j3d = np.sum(valid_j3d, -1).mean(-1)
+    valid_j3d = valid_j3d > 0
+
+    gt3ds_f = gt3ds[valid_j3d, :, :]
+    preds_f = preds[valid_j3d, :, :]
+
+    N = gt3ds_f.shape[0]
+
+    # per‐sample, per‐joint Euclidean error
+    per_joint_error = np.sqrt(((gt3ds_f - preds_f)**2).sum(axis=-1))  # shape (N, J)
+
+    mean_per_sample = per_joint_error.mean(axis=1)                    # shape (N,)
+    mpjpe_mean = mean_per_sample.mean()      # single scalar
+    mpjpe_std  = mean_per_sample.std()       # single scalar
+
+    # PA‐aligned
+    preds_sym = compute_similarity_transform_batch(preds_f, gt3ds_f)
+    per_joint_error_pa = np.sqrt(((gt3ds_f - preds_sym)**2).sum(axis=-1))
+    mean_per_sample_pa = per_joint_error_pa.mean(axis=1)
+    pa_mean = mean_per_sample_pa.mean()
+    pa_std  = mean_per_sample_pa.std()
+
+    # per‐joint averages:
+    joint_means     = per_joint_error.mean(axis=0)       # length J
+    joint_means_pa  = per_joint_error_pa.mean(axis=0)
+
+    return {
+        'mpjpe_mean': mpjpe_mean,
+        'mpjpe_std':  mpjpe_std,
+        'pa_mean':    pa_mean,
+        'pa_std':     pa_std,
+        'joint_means': joint_means,
+        'joint_means_pa': joint_means_pa
+    }
 
 def compute_3d_errors_batch(gt3ds, preds, valid_j3d):
     valid_j3d = np.sum(valid_j3d, -1).mean(-1)
