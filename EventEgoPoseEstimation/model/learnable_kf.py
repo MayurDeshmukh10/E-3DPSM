@@ -41,7 +41,7 @@ class LearnableKalmanFilter(nn.Module):
             self.x = x_init
         elif x_init.dim() == 2:  # [batch_size, state_dim]
             self.batch_size = x_init.shape[0]
-            self.x = x_init.unsqueeze(-1)  # Add column dimension
+            self.x = x_init.unsqueeze(-1)
         else:
             raise ValueError(f"Expected x_init with 2 or 3 dimensions, got {x_init.dim()}")
         
@@ -112,10 +112,10 @@ class LearnableKalmanFilter(nn.Module):
         # Expand measurement matrix for batch operations
         H_batch = self.H.unsqueeze(0).repeat(self.batch_size, 1, 1)
         
-        # Innovation (y = z - Hx) - batched
+        # y = z - Hx - batched
         y = z - torch.bmm(H_batch, self.x)
         
-        # Innovation covariance (S = HPH' + R) - batched
+        # covariance (S = HPH' + R) - batched
         S = torch.bmm(torch.bmm(H_batch, self.P), H_batch.transpose(1, 2)) + R
         
         # Kalman gain (K = PH'S⁻¹) - batched

@@ -253,8 +253,10 @@ scene.add_node(camera_node)
 
 
 def generate_skeleton_image(gt_j3d, pred_j3d):
-    gt_j3d = gt_j3d.cpu().numpy()
-    pred_j3d = pred_j3d.cpu().numpy()
+    if isinstance(gt_j3d, torch.Tensor):
+        gt_j3d = gt_j3d.cpu().numpy()
+    if isinstance(pred_j3d, torch.Tensor):
+        pred_j3d = pred_j3d.cpu().numpy()
     gt_skeleton = Skeleton((0.1, 0.9, 0.1)) # Green - RGB
     pred_skeleton = Skeleton((0.9, 0.1, 0.1)) # Red - RGB
 
@@ -286,10 +288,42 @@ def generate_skeleton_image(gt_j3d, pred_j3d):
 
     return color
 
+def generate_skeleton(j3d, color='red'):
+    j3d = j3d.cpu().numpy()
+
+    # Prepare skeleton meshes
+    if color == 'red':
+        j3d_skel = Skeleton((0.9, 0.1, 0.1))  # Red - RGB
+    elif color == 'green':
+        j3d_skel = Skeleton((0.1, 0.9, 0.1))
+    else:
+        raise ValueError("Color must be 'red' or 'green'.")
+    
+    # scene.clear()  # remove existing nodes if any
+    scene.bg_color = np.array([0.0, 0.0, 0.0, 0.0])  # RGBA
+
+    flags = pyrender.RenderFlags.RGBA
+
+    try:
+        mesh = pyrender.Mesh.from_trimesh(j3d_skel.joints_2_trimesh(j3d))
+        node = pyrender.Node(mesh=mesh)
+        scene.add_node(node)
+    except Exception:
+        traceback.print_exc()
+
+    # Render to RGBA
+    color, depth = renderer.render(scene, flags=flags)
+
+    if node is not None:
+        scene.remove_node(node)
+    
+    return color
 
 def dump_sketelon_image(gt_j3d, pred_j3d, file_name):
-    gt_j3d = gt_j3d.cpu().numpy()
-    pred_j3d = pred_j3d.cpu().numpy()
+    if isinstance(gt_j3d, torch.Tensor):
+        gt_j3d = gt_j3d.cpu().numpy()
+    if isinstance(pred_j3d, torch.Tensor):
+        pred_j3d = pred_j3d.cpu().numpy()
     gt_skeleton = Skeleton((0.1, 0.9, 0.1)) # Green - RGB
     pred_skeleton = Skeleton((0.9, 0.1, 0.1)) # Red - RGB
 

@@ -52,7 +52,7 @@ from EventEgoPoseEstimation.core.evaluate import accuracy, accuracy_with_vis, ac
 
 from EventEgoPoseEstimation.core.loss import SegmentationLoss, BoneLengthLoss, JointMSELoss, HeatMapJointsMSELoss, BoneOrientationLoss, BoneLoss
 
-from EventEgoPoseEstimation.utils.vis import save_pose_images, save_debug_images, save_debug_3d_joints, save_debug_segmenation, save_debug_eros, generate_skeleton_image, dump_sketelon_image, drift_plot
+from EventEgoPoseEstimation.utils.vis import generate_skeleton, save_pose_images, save_debug_images, save_debug_3d_joints, save_debug_segmenation, save_debug_eros, generate_skeleton_image, dump_sketelon_image, drift_plot
 
 from EventEgoPoseEstimation.core.inference import get_j2d_from_hms
 from EventEgoPoseEstimation.dataset.dataset_utils import event_augmentation, save_augmented_data
@@ -73,6 +73,9 @@ import psutil
 
 from filterpy.kalman import KalmanFilter
 from filterpy.common import Q_discrete_white_noise
+
+SAVE_VISUALIZATION = False
+VISUALIZATION_PATH = "/scratch/inf0/user/mdeshmuk/visualization/EE3D-W/ours_sk_only"
 
 class EventEgoPoseEstimation(LightningModule):
 
@@ -556,6 +559,16 @@ class EventEgoPoseEstimation(LightningModule):
 
         s5_state = outputs['s5_states']
 
+        # if batch_idx % 10 == 0:
+            # gt_skeleton = generate_skeleton(gt_abs_poses_og[0][0], color='red')
+            # pred_skeleton = generate_skeleton(outputs['abs_poses'][0][0], color='green')
+            # skeleton = np.concatenate([gt_skeleton, pred_skeleton], axis=1)
+            # input_repr = self.visualize(inps[0])
+            # cv2.imwrite(f"/CT/EventEgo3Dv2/work/code_variations/dp_att_lkf_lnes_update_deform_att/dump_output_2/input_repr_{batch_idx}.png", input_repr)
+            # cv2.imwrite(f"/CT/EventEgo3Dv2/work/code_variations/dp_att_lkf_lnes_update_deform_att/dump_output_2/skeleton_{batch_idx}.png", skeleton)
+
+
+
         val_loss_j3d = self.criterions['j3d'](pred_abs_poses.unsqueeze(0), gt_abs_poses.unsqueeze(0), vis_j3d.unsqueeze(0) * self.wgt_j3d)
         self.j3d_loss_val.update(val_loss_j3d, inps.size(0))
 
@@ -621,9 +634,9 @@ class EventEgoPoseEstimation(LightningModule):
                 data_batch = batch[start:end]
                 batch_d = torch.utils.data._utils.collate.default_collate([data_batch])
 
-                self.s5_state = self.evaluate(self.model, batch_d, prev_s5_states, batch_idx)
+                self.s5_state = self.evaluate(self.model, batch_d, prev_s5_states, self.count)
+                self.count = self.count + 1
 
-        
         elif self.training_type == 'pretrain':
             start = 0
             end = start + len(batch)
@@ -796,7 +809,11 @@ class EventEgoPoseEstimation(LightningModule):
             #     output_path = f"./visualizations/output_for_vis_lnes/{i}.png"
             #     cv2.imwrite(output_path, concatenated_image)
 
-
+            # color = dump_sketelon_image(gt_abs_poses_og[i][0].detach(), outputs['abs_poses'][i][0].detach(), f"./visualizations/new_dataloader")
+            # voxel_image = save_augmented_data(inps[i], 'test')
+            # concatenated_image = create_concatenated_image(color, voxel_image)
+            # output_path = f"./visualizations/output_for_vis_lnes/{i}.png"
+            # cv2.imwrite(output_path, concatenated_image)
 
 
             # avg_acc = torch.Tensor(a_w_kf)
@@ -1184,3 +1201,50 @@ class EvaluateCallback(Callback):
 
         print("Per joint count : ", model.per_joint_count)
         print("Total count : ", model.total_count)
+
+        sequence_range = {
+            'walk': [0, 3500],
+            'crouch': [3500, 6500],
+            'pushup': [6500, 9000],
+            'boxing': [9000, 12350],
+            'kick': [12350, 15200],
+            'dance': [15200, 17800],
+            'inter. with env': [17800, 20700],
+            'crawl': [20700, 23800],
+            'sports': [23800, 33000],
+            'jump': [33000, 200000], # max frame index
+        }
+
+
+        if SAVE_VISUALIZATION:
+            for seq_name, seq_range in sequence_range.items():
+                start_index, end_index = seq_range
+
+                # import pdb; pdb.set_trace()
+                current_seq_indices = all_frame_indices >= start_index
+                current_seq_indices = np.logical_and(current_seq_indices, all_frame_indices < end_index)
+
+                gt_j3ds = all_gt_j3ds[current_seq_indices] / 1000.0 # scale to mm
+                preds_j3d = all_preds_j3d[current_seq_indices] / 1000.0 # scale to mm
+                vis_j3d = all_vis_j3d[current_seq_indices]
+                # event_repr = all_event_repr[:, np.newaxis, :][current_seq_indices]
+                # event_repr = all_event_repr[current_seq_indices]
+                frame_indices = all_frame_indices[current_seq_indices]
+
+                os.makedirs(f"{VISUALIZATION_PATH}/{seq_name}", exist_ok=True)
+
+
+                for i in range(gt_j3ds.shape[0]):
+                    color = dump_sketelon_image(gt_j3ds[i], preds_j3d[i], "./visualizations/new_dataloader")
+                    # import pdb; pdb.set_trace()
+
+                    # event_image = visualize(event_repr[i].transpose(1, 2, 0))
+                    # event_image = visualize(event_repr[i])
+
+                    # concatenated_image = create_concatenated_image(color, event_image)
+                    # output_path = f"{VISUALIZATION_PATH}/{seq_name}/{i}.png"
+                    # cv2.imwrite(output_path, concatenated_image)
+
+                    # concatenated_image = create_concatenated_image(color, event_image)
+                    output_path = f"{VISUALIZATION_PATH}/{seq_name}/{i}.png"
+                    cv2.imwrite(output_path, color)
