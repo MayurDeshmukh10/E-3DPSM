@@ -28,7 +28,7 @@ model:
     dataset_type:  real # real
     training_type: finetune #finetune #pretrain # finetune
     use_bg_augmentation: true
-    temporal_steps: 20
+    temporal_steps: 30
     sample_step: 0 # not used currently
     batch_size: 8
     workers: 14
