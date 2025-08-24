@@ -74,8 +74,9 @@ import psutil
 from filterpy.kalman import KalmanFilter
 from filterpy.common import Q_discrete_white_noise
 
-SAVE_VISUALIZATION = False
-VISUALIZATION_PATH = "/scratch/inf0/user/mdeshmuk/visualization/EE3D-W/ours_sk_only"
+SAVE_VISUALIZATION = True
+VISUALIZATION_PATH = '/scratch/inf0/user/mdeshmuk/visualization/EE3D-R/ours'
+
 
 class EventEgoPoseEstimation(LightningModule):
 

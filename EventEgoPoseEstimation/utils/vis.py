@@ -236,7 +236,9 @@ def save_debug_images(self, config, input, meta, target, output, prefix, global_
 
 renderer = pyrender.OffscreenRenderer(1440, 1080)
 
-scene = pyrender.Scene(ambient_light=(0.9, 0.9, 0.9))
+# scene = pyrender.Scene(ambient_light=(0.9, 0.9, 0.9))
+scene = pyrender.Scene(bg_color=[0.0, 0.0, 0.0, 0.0], ambient_light=(0.9, 0.9, 0.9))
+
 camera = pyrender.PerspectiveCamera(yfov=np.pi / 2.0)
 
 
@@ -345,7 +347,9 @@ def dump_sketelon_image(gt_j3d, pred_j3d, file_name):
     except:
         traceback.print_exc()
 
-    color, depth = renderer.render(scene)
+    # color, depth = renderer.render(scene)
+    color, depth = renderer.render(scene, flags=pyrender.RenderFlags.RGBA)
+
 
     if gt_node is not None:
         scene.remove_node(gt_node)
