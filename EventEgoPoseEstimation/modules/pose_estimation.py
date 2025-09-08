@@ -74,7 +74,7 @@ import psutil
 from filterpy.kalman import KalmanFilter
 from filterpy.common import Q_discrete_white_noise
 
-SAVE_VISUALIZATION = True
+SAVE_VISUALIZATION = False
 VISUALIZATION_PATH = '/scratch/inf0/user/mdeshmuk/visualization/EE3D-R/ours'
 
 
@@ -212,7 +212,12 @@ class EventEgoPoseEstimation(LightningModule):
 
         self.count = 0
 
-        self.s5_state = None
+        self.s5_state = {
+            0: None,
+            3: None
+        }
+
+        print("Training Sequence Length :", self.temporal_steps)
 
     def forward(self, x):
         return self.model(x)
@@ -617,25 +622,22 @@ class EventEgoPoseEstimation(LightningModule):
 
         # s5_state = None
 
-        # import pdb; pdb.set_trace()
-
-
         if self.training_type in ['finetune', 'EE3D-W-finetuning']:
             for idx in range(0, self.fixed_sequence_length, self.truncated_bptt_steps):
-                self.model.kalman_filter.reset()
+                # self.model.kalman_filter.reset()
                 # s5_state = None
-                prev_s5_states = {
-                    0: None,
-                    1: None,
-                    2: None,
-                    3: None
-                }
+                # prev_s5_states = {
+                #     0: None,
+                #     1: None,
+                #     2: None,
+                #     3: None
+                # }
                 start = idx
                 end = start + self.truncated_bptt_steps
                 data_batch = batch[start:end]
                 batch_d = torch.utils.data._utils.collate.default_collate([data_batch])
 
-                self.s5_state = self.evaluate(self.model, batch_d, prev_s5_states, self.count)
+                self.s5_state = self.evaluate(self.model, batch_d, self.s5_state, self.count)
                 self.count = self.count + 1
 
         elif self.training_type == 'pretrain':
@@ -1163,10 +1165,10 @@ class EvaluateCallback(Callback):
         all_frame_indices = np.concatenate(model.all_frame_indices, axis=0)
         all_occluded_joints = np.concatenate(model.all_occluded_joints, axis=0)
 
-        # np.save("all_preds_j3d.npy", all_preds_j3d)
-        # np.save("all_gt_j3ds.npy", all_gt_j3ds)
-        # np.save("all_vis_j3d.npy", all_vis_j3d)
-        # np.save("all_frame_indices.npy", all_frame_indices)
+        np.save("/CT/EventEgo3Dv2/work/code_variations/dp_att_lkf_lnes_update_deform_att/Final_results/ee3dr_all_preds_j3d.npy", all_preds_j3d)
+        np.save("/CT/EventEgo3Dv2/work/code_variations/dp_att_lkf_lnes_update_deform_att/Final_results/ee3dr_all_gt_j3ds.npy", all_gt_j3ds)
+        np.save("/CT/EventEgo3Dv2/work/code_variations/dp_att_lkf_lnes_update_deform_att/Final_results/ee3dr_all_vis_j3d.npy", all_vis_j3d)
+        np.save("/CT/EventEgo3Dv2/work/code_variations/dp_att_lkf_lnes_update_deform_att/Final_results/ee3dr_all_frame_indices.npy", all_frame_indices)
 
         # all_frame_indices = np.array(model.all_frame_indices)
 

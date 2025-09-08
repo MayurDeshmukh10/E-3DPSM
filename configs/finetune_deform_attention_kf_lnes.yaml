@@ -11,7 +11,7 @@ model:
       image_size: [256, 192]
       batch_size: 6 #16 # 9 # individual batch size
 
-    lr: 0.001
+    lr: 0.0001
     lr_decay_epochs:
       - 92 #10
       - 97 #15
