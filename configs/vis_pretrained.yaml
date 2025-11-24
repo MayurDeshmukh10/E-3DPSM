@@ -1,0 +1,66 @@
+seed_everything: 42
+
+model:
+  class_path: EventEgoPoseEstimation.modules.EventEgoPoseEstimation
+  init_args:
+    model_cfg:
+      num_joints: 16
+      eros: True
+      input_channel: 20 #36 (works well in vis) #18 #12 #18
+      posenet_input_channel: 2
+      image_size: [256, 192]
+      batch_size: 1 #16 #16 # 9 # individual batch size
+    
+    lr: 0.01
+    lr_decay_epochs:
+      - 5 #10
+      - 7 #15
+    dataset_type:  synthetic # real
+    training_type: pretrain #finetune #pretrain # finetune
+    temporal_steps: 1
+    batch_size: 1 #16
+    workers: 14
+
+
+ckpt_path: /CT/EventEgo3Dv2/work/EventEgo3Dv2/results/delta_prediction_gpu20_autoregressive/version_1/checkpoints/epoch_epoch=02_step_step=70000.ckpt
+
+trainer:
+  accelerator: gpu
+  max_epochs: 10
+  check_val_every_n_epoch: 1
+  devices: 1
+  benchmark: false
+  precision: 16-mixed
+  strategy: ddp_find_unused_parameters_true
+  fast_dev_run: false
+  # limit_train_batches: 2
+  # limit_val_batches: 2
+  limit_test_batches: 1
+  # every_n_train_steps: 200
+#  gradient_clip_val: 5.0
+#  gradient_clip_algorithm: norm
+  callbacks:
+    - class_path: pytorch_lightning.callbacks.TQDMProgressBar
+      init_args:
+        refresh_rate: 50
+    - class_path: pytorch_lightning.callbacks.ModelCheckpoint
+      init_args:
+        every_n_epochs: 1
+        save_top_k: -1
+        filename: "{epoch}"
+    # - class_path: EventEgoPoseEstimation.modules.pose_estimation.EvaluateCallback
+    - class_path: pytorch_lightning.callbacks.ModelCheckpoint
+      init_args:
+        every_n_train_steps: 10000
+        save_top_k: -1
+        filename: "epoch_{epoch:02d}_step_{step}"
+        # dirpath: "./results/"
+        save_last: True
+
+  logger:
+    - class_path: pytorch_lightning.loggers.TensorBoardLogger
+      init_args:
+        save_dir: ./visualizations/skeleton_vis
+        name: test
+        #name: evaluate_delta_prediction_gpu20_fixed_optimized # Experiment name
+

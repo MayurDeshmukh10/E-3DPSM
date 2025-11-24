@@ -1,0 +1,93 @@
+seed_everything: 50
+
+model:
+  class_path: EventEgoPoseEstimation.modules.EventEgoPoseEstimation
+  init_args:
+    model_cfg:
+      num_joints: 16
+      eros: True
+      input_channel: 20 #36 (works well in vis) #18 #12 #18
+      posenet_input_channel: 20
+      image_size: [256, 192]
+      batch_size: 4 #16 # 9 # individual batch size
+
+    lr: 0.001
+    lr_decay_epochs:
+      - 5 #10
+      - 7 #15
+    loss_weights:
+      bone_length: 0.001
+      bone_orientation: 0.001
+      j2d: 0.01
+      j3d: 0.02
+      heatmap: 10
+      delta_j3d: 0.01
+      seg: 0.1
+
+    dataset_type:  synthetic #synthetic #synthetic # real
+    training_type: pretrain #pretrain #pretrain #finetune #pretrain # finetune
+    use_bg_augmentation: true
+    temporal_steps: 20
+    sample_step: 10
+    batch_size: 4
+    workers: 14
+
+
+# ckpt_path: /CT/EventEgo3Dv2/work/EventEgo3Dv2/results/wandb_data/pretraining_new_dataloader_oom_fixed_5_1/EventEgo3Dv2/ha8vz1xf/checkpoints/epoch=9.ckpt
+ckpt_path: /CT/EventEgo3Dv2/work/EventEgo3Dv2/results/wandb_data/pretraining_new_dataloader_oom_fixed_5_1/EventEgo3Dv2/ha8vz1xf/checkpoints/epoch=9.ckpt
+
+
+trainer:
+  accelerator: gpu
+  max_epochs: 20
+  check_val_every_n_epoch: 1
+  devices: 1
+  # num_nodes: 2
+  benchmark: false
+  # precision: 16-mixed
+  strategy: ddp_find_unused_parameters_true
+  # strategy: ddp
+  fast_dev_run: false
+  # limit_train_batches: 10000
+  # limit_val_batches: 10
+  # every_n_train_steps: 200
+  # gradient_clip_val: 5
+  # gradient_clip_algorithm: norm
+  callbacks:
+    - class_path: pytorch_lightning.callbacks.TQDMProgressBar
+      init_args:
+        refresh_rate: 50
+    - class_path: pytorch_lightning.callbacks.ModelCheckpoint
+      init_args:
+        every_n_epochs: 1
+        save_top_k: -1
+        filename: "{epoch}"
+    # - class_path: EventEgoPoseEstimation.modules.pose_estimation.EvaluateCallback
+    - class_path: pytorch_lightning.callbacks.ModelCheckpoint
+      init_args:
+        every_n_train_steps: 10000
+        save_top_k: -1
+        filename: "epoch_{epoch:02d}_step_{step}"
+        # dirpath: "./results/"
+        save_last: True
+    # - class_path: pytorch_lightning.callbacks.LearningRateFinder
+
+
+  # logger:
+  #   - class_path: pytorch_lightning.loggers.TensorBoardLogger
+  #     init_args:
+  #       save_dir: ./results/
+  #       name: test # Experiment name
+
+  logger:
+  # - class_path: pytorch_lightning.loggers.WandbLogger
+  #   init_args:
+  #     name: test8  # Experiment name on wandb
+  #     project: EventEgo3Dv2  # Replace with your project name on wandb
+  #     save_dir: ./results/test8  # Local directory to save wandb logs
+  #     log_model: true  # Log the model checkpoints to wandb
+  #     offline: false  # Set to true if you want to log offline and sync later
+  - class_path: pytorch_lightning.loggers.TensorBoardLogger
+    init_args:
+      save_dir: ./results/
+      name: pretraining_new_dataloader_evaluate_window_100msec_ts20  # TensorBoard experiment name

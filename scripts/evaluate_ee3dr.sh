@@ -1,18 +1,17 @@
 #!/bin/bash
-#SBATCH --signal=B:SIGTERM@120
 #SBATCH -p gpu20
-#SBATCH --mem=192G
 #SBATCH --gres gpu:1
-#SBATCH -o ./logs/slurm_evaluations/evalutate-%j.out
-#SBATCH -t 8:00:00
-#SBATCH --mail-type=fail
-#SBATCH --mail-user=mrkristen@gmail.com
+#SBATCH --mem=244G
+#SBATCH --signal=SIGUSR1@90
+#SBATCH -o /CT/EventEgo3Dv2/work/code_variations/dp_att_lkf_lnes_update_deform_att/Final_results/out-%j.out
+#SBATCH -e /CT/EventEgo3Dv2/work/code_variations/dp_att_lkf_lnes_update_deform_att/Final_results/err-%j.err
+#SBATCH -t 3:00:00
 
-eval "$(conda shell.bash hook)"
+cd /CT/EventEgo3Dv2/work/code_variations/dp_att_lkf_lnes_update_deform_att
   
-conda activate EE3D_CVPR
+source activate ee3dh100
 
-export BATCH_SIZE=27
-export TEMPORAL_STEPS="20"
+# EXP_NAME='eval_att_finetuning_best_epoch_w_jitter_ts_10' TRAINING_TYPE='pretrain' BATCH_SIZE=9 srun python3 run.py test --config ./configs/evaluate_finetune_preprocessed_input_attention_kf_lnes.yaml
+EXP_NAME='eval_non_causal_epoch_24_finetune' TRAINING_TYPE='pretrain' BATCH_SIZE=9 srun python3 run.py test --config ./configs/evaluate_deform_attention_kf_lnes.yaml
 
-python evaluate_ee3d_r.py
+# EXP_NAME='eval_non_causal_epoch_24_finetune' TRAINING_TYPE='pretrain' BATCH_SIZE=9 python3 run.py test --config ./configs/evaluate_preprocessed_input_attention_kf_lnes_temp.yaml
