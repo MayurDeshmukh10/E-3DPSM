@@ -1,7 +1,7 @@
-# EventEgo3D: 3D Human Motion Capture from Egocentric Event Streams [CVPR'24]
+# E-3DPSM: A State Machine for Event-based Egocentric 3D Human Pose Estimation [CVPR'24]
 <center>
 
-Christen Millerdurai<sup>1,2</sup>, Hiroyasu Akada<sup>1</sup>, Jian Wang<sup>1</sup>, Diogo Luvizon<sup>1</sup>, Christian Theobalt<sup>1</sup>, Vladislav Golyanik<sup>1</sup>
+<!-- Christen Millerdurai<sup>1,2</sup>, Hiroyasu Akada<sup>1</sup>, Jian Wang<sup>1</sup>, Diogo Luvizon<sup>1</sup>, Christian Theobalt<sup>1</sup>, Vladislav Golyanik<sup>1</sup> -->
 
 <sup>1</sup> Max Planck Institute for Informatics, SIC  &nbsp; &nbsp; &nbsp; &nbsp; <sup>2</sup> Saarland University, SIC  
 
@@ -17,7 +17,7 @@ Christen Millerdurai<sup>1,2</sup>, Hiroyasu Akada<sup>1</sup>, Jian Wang<sup>1<
 
 ### Abstract
 
-Monocular egocentric 3D human motion capture is a challenging and actively researched problem. Existing methods use synchronously operating visual sensors (e.g. RGB cameras) and often fail under low lighting and fast motions, which can be restricting in many applications involving head-mounted devices. In response to the existing limitations, this paper 1) introduces a new problem, i.e. **3D human motion capture from an egocentric monocular event camera with a fisheye lens**, and 2) proposes the first approach to it called EventEgo3D (EE3D). Event streams have high temporal resolution and provide reliable cues for **3D human motion capture under high-speed human motions and rapidly changing illumination**. The proposed EE3D framework is specifically tailored for learning with event streams in the LNES representation, enabling high 3D reconstruction accuracy. We also design a prototype of a mobile head-mounted device with an event camera and record a real dataset with event observations and the ground-truth 3D human poses (in addition to the synthetic dataset). Our EE3D demonstrates robustness and superior 3D accuracy compared to existing solutions across various challenging experiments while supporting **real-time 3D pose update rates of 140Hz**.
+Event cameras offer multiple advantages in monocular egocentric 3D human pose estimation from head-mounted devices, such as millisecond temporal resolution, high dynamic range, and negligible motion blur. Existing methods effectively leverage these properties, but suffer from low 3D estimation accuracy, insufficient in many applications (e.g., immersive VR/AR). This is due to the design not being fully tailored towards event streams (e.g., their asynchronous and continuous nature), leading to high sensitivity to self-occlusions and temporal jitter in the estimates. This paper rethinks the setting and introduces E-3DPSM, an event-driven continuous pose state machine for event-based egocentric 3D human pose estimation. E-3DPSM aligns continuous human motion with fine-grained event dynamics; it evolves latent states and predicts continuous changes in 3D joint positions associated with observed events, which are fused with direct 3D human pose predictions, leading to stable and drift-free final 3D pose reconstructions. E-3DPSM runs in real-time at $80$ Hz on a single workstation and sets a new state of the art in experiments on two benchmarks, improving accuracy by up to $19\%$ (MPJPE) and temporal stability by up to $64\%$.
 
 ### Advantages of Event Based Vision
 High Speed Motion                      |  Low Light Performance          
@@ -27,7 +27,7 @@ High Speed Motion                      |  Low Light Performance
 ### EventEgo3D
 
 <p align="center">
-<img src="images/architecture-min.png" alt="EventEgo3D" /></br>
+<img src="images/method_figure.png" alt="E-3DPSM" /></br>
 </p>
 
 ## Usage
