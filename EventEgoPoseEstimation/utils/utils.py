@@ -87,18 +87,6 @@ def get_optimizer(cfg, model):
 
     return optimizer
 
-
-def save_checkpoint(epoch, states, is_best, output_dir, tb_log_dir, filename='checkpoint.pth'):
-    prefix = name = os.path.basename(tb_log_dir)
-    
-    filename = f'{prefix}_epoch_{epoch}_{filename}'
-      
-    torch.save(states, os.path.join(output_dir, filename))
-    if is_best and 'state_dict' in states:
-        torch.save(states['best_state_dict'],
-                   os.path.join(output_dir, 'model_best.pth'))
-
-
 def get_model_summary(model, *input_tensors, item_length=26, verbose=False):
     """
     :param model:

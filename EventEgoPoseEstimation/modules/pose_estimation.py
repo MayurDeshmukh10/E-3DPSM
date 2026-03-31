@@ -2,28 +2,18 @@ import os
 import time
 from typing import Optional
 
+from EventEgoPoseEstimation import model
 import torch
-import torch.nn as nn
 from torch.utils.data import Dataset
 import torch.nn.parallel
 import torch.optim as optim
 import torch.utils.data
 import torch.utils.data.distributed
 
-import uuid
-
 from pytorch_lightning import LightningModule
-from pytorch_lightning.strategies import ParallelStrategy
 from pytorch_lightning.callbacks import Callback
 
-from torch.optim.lr_scheduler import MultiStepLR
-import torch.distributed as dist
-
-from PIL import Image
-
 import numpy as np
-
-import logging
 
 import cv2
 
@@ -34,21 +24,17 @@ import matplotlib.pyplot as plt
 
 from EventEgoPoseEstimation.model import EgoHPE
 
-from EventEgoPoseEstimation.dataset.dataset_utils import collate_variable_size, create_image, camera_to_j2d_batch
+from EventEgoPoseEstimation.dataset.dataset_utils import camera_to_j2d_batch
 
 from EventEgoPoseEstimation.dataset import EgoEvent, EgoEventv2, AugmentedEgoEvent, TemoralWrapper, CombinedEgoEvent, EgoEventSequence
 
-from EventEgoPoseEstimation.utils.utils import AverageMeter, save_checkpoint, create_logger
-
-from EventEgoPoseEstimation.utils.skeleton import Skeleton
+from EventEgoPoseEstimation.utils.utils import AverageMeter, create_logger
 
 from configs.settings import config as cfg
 
-from EventEgoPoseEstimation.core.function import compute_fn, _print_name_value, compute_fn_v2, compute_fn_v3, compute_fn_v4, compute_fn_new
+from EventEgoPoseEstimation.core.function import _print_name_value, compute_fn_v3, compute_fn_v4
 
-from EventEgoPoseEstimation.core.evaluate import accuracy, accuracy_with_vis, accuracy_test, create_concatenated_image, compute_motion_jitter
-
-# from EventEgoPoseEstimation.core.kalman_filter import apply_kalman_filtering
+from EventEgoPoseEstimation.core.evaluate import accuracy, compute_motion_jitter
 
 from EventEgoPoseEstimation.core.loss import SegmentationLoss, BoneLengthLoss, JointMSELoss, HeatMapJointsMSELoss, BoneOrientationLoss, BoneLoss
 
@@ -60,19 +46,13 @@ from EventEgoPoseEstimation.dataset.dataset_utils import event_augmentation, sav
 
 import ocam
 
-import torchvision
-
 logger, final_output_dir, tb_log_dir = create_logger(
         cfg, cfg.EXP_NAME, 'train')
 
 torch.set_float32_matmul_precision('medium')
 
-import itertools
 import os
-import psutil
 
-from filterpy.kalman import KalmanFilter
-from filterpy.common import Q_discrete_white_noise
 
 SAVE_VISUALIZATION = False
 VISUALIZATION_PATH = '/scratch/inf0/user/mdeshmuk/visualization/EE3D-R/ours'
@@ -137,7 +117,6 @@ class EventEgoPoseEstimation(LightningModule):
         self.fixed_sequence_length = fixed_sequence_length
         self.truncated_bptt_steps = tbptt_steps
 
-
         self.train_dataset: Optional[Dataset] = None
         self.eval_dataset: Optional[Dataset] = None
         self.test_dataset: Optional[Dataset] = None
@@ -146,9 +125,7 @@ class EventEgoPoseEstimation(LightningModule):
         self.criterions = {
             'j3d': JointMSELoss(use_target_weight=True).cuda(),
             'delta_j3d': JointMSELoss(use_target_weight=True).cuda(),
-            'heatmap': HeatMapJointsMSELoss(use_target_weight=True).cuda(),
             'j2d': JointMSELoss(use_target_weight=True).cuda(),
-            'seg': SegmentationLoss().cuda(),
             'bone_length': BoneLengthLoss(use_target_weight=True).cuda(),
             'bone_orientations': BoneOrientationLoss(use_target_weight=False).cuda(),
             'bone_loss': BoneLoss().cuda()
@@ -194,21 +171,13 @@ class EventEgoPoseEstimation(LightningModule):
         self.wgt_j3d = loss_weights['j3d']
         self.wgt_j2d = loss_weights['j2d']
         self.wgt_seg = loss_weights['seg']
-        self.wgt_heatmap = loss_weights['heatmap']
         self.wgt_j3d_delta = loss_weights['delta_j3d']
 
         self.s5_states = None
 
         self.ocam_model = ocam.to_ocam_model('/CT/EventEgo3Dv2/work/egoposeformer/pose_estimation/models/utils/intrinsics.json')
 
-
-        # self.initial_pose = torch.from_numpy(np.load('./initial_pose.npy')).unsqueeze(0).expand(self.model_batch_size, -1, -1)
-
         self.automatic_optimization = True
-
-        # self.scaler = self.trainer.precision_plugin.scaler  # Lightning provides this if AMP is enabled
-
-        # self.example_input_array = torch.Tensor(1, 1, 32768, 4)
 
         self.count = 0
 
@@ -226,34 +195,7 @@ class EventEgoPoseEstimation(LightningModule):
     
         if stage == "fit":
 
-            if self.training_type == 'pretrain':
-                logger.info("Training type: Pretrain")
-                cfg.DATASET.TYPE = 'Synthetic'
-                if self.use_bg_augmentation:
-                    pretrain_dataset = AugmentedEgoEvent(cfg, 
-                                        EgoEvent(cfg, self.syn_preprocessed_input_path, self.syn_dataset_root_path, temporal_bins=self.temporal_bins, split='train'), 
-                                        bg_data_root=self.bg_dataset_root_path, 
-                                        bg_preprocessed_root=self.bg_preprocessed_input_path,
-                                        split='train',
-                                        temporal_bins=self.temporal_bins)
-                else:
-                    pretrain_dataset = EgoEvent(cfg, self.syn_preprocessed_input_path, self.syn_dataset_root_path, temporal_bins=self.temporal_bins, split='train')
-
-                # cfg.DATASET.TYPE = 'Synthetic'
-                # cfg.DATASET.SYN_ROOT = cfg.DATASET.SYN_TEST_ROOT 
-                # TODO: change test to val again
-                eval_dataset = AugmentedEgoEvent(
-                                    cfg, 
-                                    EgoEvent(cfg, self.syn_preprocessed_input_path, self.syn_test_dataset_root_path, temporal_bins=self.temporal_bins, split='test'), 
-                                    bg_data_root=self.bg_dataset_root_path, 
-                                    bg_preprocessed_root=self.bg_preprocessed_input_path,
-                                    split='test', 
-                                    temporal_bins=self.temporal_bins)
-                
-                self.eval_dataset = TemoralWrapper(eval_dataset, self.temporal_steps, split='test', sample_step=self.sample_step)
-                self.train_dataset = TemoralWrapper(pretrain_dataset, self.temporal_steps, split='train', sample_step=self.sample_step)
-
-            elif self.training_type == 'finetune':
+            if self.training_type == 'train':
                 logger.info("Training type: Finetune")
 
                 finetune_dataset = AugmentedEgoEvent(
@@ -277,7 +219,7 @@ class EventEgoPoseEstimation(LightningModule):
                 self.train_dataset = TemoralWrapper(finetune_dataset, self.temporal_steps, split='train', sample_step=self.sample_step)
 
             
-            elif self.training_type == 'EE3D-W-finetuning':
+            elif self.training_type == 'finetuning':
 
                 finetune_dataset = AugmentedEgoEvent(
                                     cfg,
@@ -298,78 +240,18 @@ class EventEgoPoseEstimation(LightningModule):
 
                 self.eval_dataset = TemoralWrapper(eval_dataset, self.temporal_steps, split='test', sample_step=self.sample_step)
                 self.train_dataset = TemoralWrapper(finetune_dataset, self.temporal_steps, split='train', sample_step=self.sample_step)
-
-                # finetune_dataset = EgoEventv2(cfg, self.real_dataset_root_path, self.real_preprocessed_input_path, temporal_bins=self.temporal_bins, split='train', finetune=True)
-                # eval_dataset = EgoEventv2(cfg, self.real_dataset_root_path, self.real_preprocessed_input_path, temporal_bins=self.temporal_bins, split='test', finetune=True)
-
-                # finetune_dataset = EgoEventv2(cfg, temporal_bins=self.temporal_bins, split='train', finetune=True)
-                # eval_dataset = EgoEventv2(cfg, temporal_bins=self.temporal_bins, split='test', finetune=True)
-
-                # self.eval_dataset = TemoralWrapper(eval_dataset, self.temporal_steps, split='test', sample_step=self.sample_step)
-                # self.train_dataset = TemoralWrapper(finetune_dataset, self.temporal_steps, split='train', sample_step=self.sample_step)
-
-                # self.eval_dataset = TemoralWrapper(EgoEvent(cfg, self.real_preprocessed_input_path, self.real_dataset_root_path, temporal_bins=self.temporal_bins, split='val'), self.temporal_steps, split='val', sample_step=self.sample_step)
-                # self.train_dataset = TemoralWrapper(finetune_dataset, self.temporal_steps, split='train', sample_step=self.sample_step)
             else:
                 assert False, f"Invalid training type: {self.training_type}"
 
-        # TODO: Fix this
-        # if stage == "test" or stage == "predict":
-        #     if self.training_type == 'pretrain':
-
-        #         # cfg.DATASET.SYN_ROOT = cfg.DATASET.SYN_TEST_ROOT 
-        #         # cfg.DATASET.TYPE = 'Synthetic'
-        #         # cfg.DATASET.BG_AUG = False
-        #         # cfg.DATASET.TRAIN_TEST_SPLIT = 0
-        #         test_dataset = self.syn_test_dataset_root_path
-        #         test_preprocessed_input = self.syn_preprocessed_input_path
-
-        #     elif self.training_type == 'finetune':
-        #         # cfg.DATASET.TYPE = 'Real'
-        #         # cfg.DATASET.BG_AUG = False
-        #         test_dataset = self.real_dataset_root_path
-        #         test_preprocessed_input = self.real_preprocessed_input_path
-        #     else:
-        #         assert False, f"Invalid training type: {self.training_type}"
- 
-
-        #     test_dataset = EgoEvent(cfg, test_preprocessed_input, test_dataset, temporal_bins=self.temporal_bins, split='test')
-        #     self.test_dataset = TemoralWrapper(test_dataset, self.temporal_steps, split='test', sample_step=self.sample_step)
-
         if stage == "test" or stage == "predict":
-            if self.training_type == 'pretrain':
-
-                # cfg.DATASET.SYN_ROOT = cfg.DATASET.SYN_TEST_ROOT 
-                # cfg.DATASET.TYPE = 'Synthetic'
-                # cfg.DATASET.BG_AUG = False
-                # cfg.DATASET.TRAIN_TEST_SPLIT = 0
-                test_dataset = self.syn_test_dataset_root_path
-                test_preprocessed_input = self.syn_preprocessed_input_path
-
-            elif self.training_type == 'finetune':
-                # cfg.DATASET.TYPE = 'Real'
-                # cfg.DATASET.BG_AUG = False
+            if self.training_type == 'train':
                 test_dataset = self.real_dataset_root_path
                 test_preprocessed_input = self.real_preprocessed_input_path
-            elif self.training_type == 'EE3D-W-finetuning':
-                # cfg.DATASET.TYPE = 'Real'
-                # cfg.DATASET.BG_AUG = False
+            elif self.training_type == 'finetuning':
                 test_dataset = self.wild_dataset_root_path
                 test_preprocessed_input = self.wild_preprocessed_input_path
             else:
                 assert False, f"Invalid training type: {self.training_type}"
-
-
-            # eval_dataset = AugmentedEgoEvent(
-                                    # cfg,
-                                    # EgoEvent(cfg, self.real_preprocessed_input_path, self.real_dataset_root_path, temporal_bins=self.temporal_bins, split='test'),
-                                    # bg_data_root=self.bg_dataset_root_path, 
-                                    # bg_preprocessed_root=self.bg_preprocessed_input_path,
-                                    # split='finetune',
-                                    # temporal_bins=self.temporal_bins)
-
-            # self.test_dataset = TemoralWrapper(eval_dataset, self.temporal_steps, split='test', sample_step=self.sample_step)
-            
             
             self.test_dataset = EgoEventSequence(cfg, 
                                         test_preprocessed_input,
@@ -441,57 +323,33 @@ class EventEgoPoseEstimation(LightningModule):
             3: None
         }
 
-        inps, outputs, gt_hms, gt_poses, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index, pose_filename, vis_ja = compute_fn_v3(self.model, batch, prev_s5_states)
-        # inps, outputs, gt_hms, gt_poses, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index, vis_ja = compute_fn_new(self.model, batch)
+        inps, outputs, meta_data = compute_fn_v4(self.model, batch, prev_s5_states, augmentation=True)
 
+        gt_poses = meta_data['gt_j3d']
+        gt_j2d = meta_data['gt_j2d']
+        vis_j2d = meta_data['vis_j2d']
+        vis_j3d = meta_data['vis_j3d']
+        valid_j3d = meta_data['valid_j3d']
+        vis_ja = meta_data['vis_ja']
 
-        meta = {'j3d': gt_poses, 'j2d': gt_j2d, 'vis_j2d': vis_j2d, 'vis_j3d': vis_j3d}
-
-        
         pred_poses_2d = camera_to_j2d_batch(outputs['abs_poses'].view(-1, 16, 3), self.image_size, self.ocam_model)
-
-        # import pdb; pdb.set_trace()
-
-        # T, B, _, _ = outputs['abs_poses'].shape
-        # gt_poses = gt_poses.reshape(T, B, 16, 3)
-        # gt_seg = gt_seg.reshape(T, B, 1, 192, 256)
-        # vis_j3d = vis_j3d.reshape(T, B, 16, 1)
-        # vis_j2d = vis_j2d.reshape(T, B, 16, 1)
-        # vis_ja = vis_ja.reshape(T, B, 16, 1)
-        # valid_j3d = valid_j3d.reshape(T, B, 16, 1)
-
-
         gt_poses_2d = camera_to_j2d_batch(gt_poses.view(-1, 16, 3), self.image_size, self.ocam_model)
-
-        # gt_poses_2d = camera_to_j2d_batch(gt_poses.view(-1, 16, 3), self.image_size, self.ocam_model)
-
         pred_poses_2d = pred_poses_2d.reshape(outputs['abs_poses'].shape[0], outputs['abs_poses'].shape[1], 16, 2)
         gt_poses_2d = gt_poses_2d.reshape(gt_poses.shape[0], gt_poses.shape[1], 16, 2)
 
-
-        gt_poses_temp = gt_poses
         gt_poses = gt_poses  * 1000 # scale to mm
         pred_poses = outputs['abs_poses'] * 1000 # scale to mm
         pred_delta_poses = outputs['delta_poses'] * 1000 # scale to mm
-        # pred_seg = outputs['seg']
         valid_seg = valid_seg.view(self.temporal_steps, self.batch_size, 1, 1, 1)
         gt_delta_poses = gt_poses[1:, :, :, :] - gt_poses[:-1, :, :, :]
-        # pred_heatmaps = outputs['heatmaps']
         
         s5_states = outputs['s5_states']
         for stage, s5_state in s5_states.items():
             s5_state.detach()
 
-
-        # for i in range(gt_poses.shape[0]):
-            # dump_sketelon_image(gt_poses_temp[i][0], gt_poses_temp[i][0], f"./visualizations/sanity/{i}_gt_j3d.png")
-            # save_pose_images(pred_poses_2d.detach().cpu(), gt_poses_2d.detach().cpu(), '/CT/EventEgo3Dv2/work/EventEgo3Dv2/visualizations/sanity', mask_images=gt_seg.detach().cpu())
-
         loss_j3d_delta = self.criterions['delta_j3d'](pred_delta_poses, gt_delta_poses, vis_j3d[1:, :] * self.wgt_j3d_delta)
-        # loss_seg = self.criterions['seg'](pred_seg, gt_seg, valid_seg * self.wgt_seg)
         loss_j3d = self.criterions['j3d'](pred_poses, gt_poses, vis_j3d * self.wgt_j3d)
         loss_j2d = self.criterions['j2d'](pred_poses_2d, gt_poses_2d, vis_j2d * self.wgt_j2d)
-        # loss_heatmaps = self.criterions['heatmap'](pred_heatmaps, gt_hms, vis_j2d * self.wgt_heatmap)
         loss_bone_length = self.criterions['bone_length'](pred_poses, gt_poses, vis_j3d * self.wgt_bone_length)
         loss_angle = self.criterions['bone_loss'](pred_poses, gt_poses, vis_ja * self.wgt_bone_angle, vis_ja * self.wgt_bone_length)
 
@@ -503,100 +361,38 @@ class EventEgoPoseEstimation(LightningModule):
                         loss_bone_length, gt_poses, pred_poses, valid_j3d, inps)
 
         end = time.time()
-
-        # self._log_metrics()
-        # self._log_training_progress(batch_idx, end)
-        # # print("Input shape ", inp.shape)
-        # self._log_memory_stats()
         
         if batch_idx % cfg.PRINT_FREQ == 0:
             self._log_metrics()
             self._log_training_progress(batch_idx, end)
             self._log_memory_stats()
-
-            # if int(self.batch_size) < 4:
-            #     n_images = int(self.batch_size)
-            # else:
-            #     n_images = 4
-
-            # if batch_idx % (cfg.PRINT_FREQ * 4) == 0:
-            #     try:
-            #         inp = inp.detach().cpu().numpy()
-            #         gt_poses = gt_poses.detach()
-            #         pred_poses = pred_poses.detach()
-            #         gt_seg = gt_seg
-            #         # pred_seg_detached = pred_seg_detached
-            #         # pred_eros_image = pred_eros_image
-            #         # representation_image = representation_image
-
-            #         # save_debug_images(self, cfg, representation_image, meta, gt_hms, pred_hms, 'train', self.global_steps, n_images=n_images)
-            #         save_debug_3d_joints(self, cfg, inp, meta, gt_poses, pred_poses, 'train', global_step=self.global_steps)
-            #         # save_debug_segmenation(self, cfg, inp, meta, gt_seg, pred_seg_detached, 'train', global_step=self.global_steps)
-            #         # save_debug_eros(self, cfg, representation_image, meta, pred_eros_image, 'train', global_step=self.global_steps)
-            #     except Exception as e:
-            #         logger.error("Error in saving debug data : {}".format(e))
-
         
         return loss
-
-    def visualize(self, lnes: np.ndarray):
-        # if torch.Tensor, convert
-        if isinstance(lnes, torch.Tensor):
-            # assume shape (C, H, W)
-            lnes = lnes.permute(1, 2, 0).detach().cpu().numpy()
-        lnes = (lnes.copy() * 255).astype(np.uint8)
-                    
-        h, w = lnes.shape[:2]
-        b = lnes[..., :1]      # channel 0 → blue
-        r = lnes[..., 1:]      # channel 1 → red
-        g = np.zeros((h, w, 1), dtype=np.uint8)  # green = 0
-
-        rgb = np.concatenate([r, g, b], axis=2)
-        return rgb
     
     def evaluate(self, model, batch, s5_state, batch_idx):
         model.eval()
+        
         with torch.no_grad():
-            inps, outputs, gt_hms, gt_abs_poses_og, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index, pose_filename, valid_joints = compute_fn_v4(model, batch, s5_state)
+            inps, outputs, meta_data = compute_fn_v4(model, batch, s5_state, augmentation=False)
+        
+        gt_abs_poses = meta_data['gt_j3d'] * 1000.0
+        valid_j3d = meta_data['valid_j3d']
+        valid_joints = meta_data['valid_joints']
+        frame_index = meta_data['frame_index']
+        vis_j3d = meta_data['vis_j3d']
 
-        pred_abs_poses = outputs['abs_poses'] * 1000 # scale to mm  (previous pose + current delta + kalman filtering)
-        gt_abs_poses = gt_abs_poses_og * 1000 # scale to mm
-        valid_j3d = valid_j3d
+        pred_abs_poses = outputs['abs_poses'] * 1000 # scale to mm
+        
+        # gt_abs_poses = gt_abs_poses_og * 1000 # scale to mm
+        # valid_j3d = valid_j3d
 
         s5_state = outputs['s5_states']
-
-        # if batch_idx % 10 == 0:
-            # gt_skeleton = generate_skeleton(gt_abs_poses_og[0][0], color='red')
-            # pred_skeleton = generate_skeleton(outputs['abs_poses'][0][0], color='green')
-            # skeleton = np.concatenate([gt_skeleton, pred_skeleton], axis=1)
-            # input_repr = self.visualize(inps[0])
-            # cv2.imwrite(f"/CT/EventEgo3Dv2/work/code_variations/dp_att_lkf_lnes_update_deform_att/dump_output_2/input_repr_{batch_idx}.png", input_repr)
-            # cv2.imwrite(f"/CT/EventEgo3Dv2/work/code_variations/dp_att_lkf_lnes_update_deform_att/dump_output_2/skeleton_{batch_idx}.png", skeleton)
-
-
 
         val_loss_j3d = self.criterions['j3d'](pred_abs_poses.unsqueeze(0), gt_abs_poses.unsqueeze(0), vis_j3d.unsqueeze(0) * self.wgt_j3d)
         self.j3d_loss_val.update(val_loss_j3d, inps.size(0))
 
-        # avg_acc, cnt, self.count = accuracy_with_vis(gt_abs_poses, pred_abs_poses, valid_j3d, batch_idx, outputs['abs_poses'].detach(), gt_abs_poses_og.detach(), inps, None, self.count)
         avg_acc, cnt = accuracy(gt_abs_poses, pred_abs_poses, valid_j3d)
         avg_acc_occlusion, cnt_occl = accuracy(gt_abs_poses, pred_abs_poses, (1 - valid_joints).unsqueeze(-1))
-        # qq = (1 - valid_joints).squeeze(1)
-        # mask = torch.zeros(qq.size(0), dtype=torch.bool, device=qq.device)
-        # joint_idxs = [0, 1]
-        # for j in joint_idxs:
-        #     mask |= (qq[:, j] == 1)
-
-        # selected_inps = inps[mask]
-
-        # for idx, sample in enumerate(selected_inps):
-        #     # sample: tensor (2, H, W)
-        #     rand_id = uuid.uuid4().hex[:8]
-        #     img_np = self.visualize(sample)           # → (H, W, 3) uint8
-        #     img = Image.fromarray(img_np)        # PIL Image
-        #     filename = f"sample_{idx:02d}_{rand_id}.png"
-        #     img.save(os.path.join('/CT/EventEgo3Dv2/work/code_variations/dp_att_lkf_lnes_update_deform_att/occl_images/', filename))
-
 
         self.per_joint_count += (1 - valid_joints).squeeze(1).sum(dim=0)
         self.total_count += valid_joints.shape[0] * valid_joints.shape[1]
@@ -615,38 +411,17 @@ class EventEgoPoseEstimation(LightningModule):
         return s5_state
     
     
-    def test_step_sequence(self, batch, batch_idx, prefix, vis=False):
+    def test_step_sequence(self, batch, batch_idx, prefix):
         self.model.eval()
 
-        # self.model.kalman_filter.reset()
-
-        # s5_state = None
-
-        if self.training_type in ['finetune', 'EE3D-W-finetuning']:
-            for idx in range(0, self.fixed_sequence_length, self.truncated_bptt_steps):
-                # self.model.kalman_filter.reset()
-                # s5_state = None
-                # prev_s5_states = {
-                #     0: None,
-                #     1: None,
-                #     2: None,
-                #     3: None
-                # }
-                start = idx
-                end = start + self.truncated_bptt_steps
-                data_batch = batch[start:end]
-                batch_d = torch.utils.data._utils.collate.default_collate([data_batch])
-
-                self.s5_state = self.evaluate(self.model, batch_d, self.s5_state, self.count)
-                self.count = self.count + 1
-
-        elif self.training_type == 'pretrain':
-            start = 0
-            end = start + len(batch)
+        for idx in range(0, self.fixed_sequence_length, self.truncated_bptt_steps):
+            start = idx
+            end = start + self.truncated_bptt_steps
             data_batch = batch[start:end]
             batch_d = torch.utils.data._utils.collate.default_collate([data_batch])
 
-            self.s5_state = self.evaluate(self.model, batch_d, self.s5_state, batch_idx)
+            self.s5_state = self.evaluate(self.model, batch_d, self.s5_state, self.count)
+            self.count = self.count + 1
 
         self.log('val_loss', self.j3d_loss_val.avg, sync_dist=True, batch_size=self.batch_size)
         self.log('val_acc', self.acc_j3d_val.avg, sync_dist=True, batch_size=self.batch_size)
@@ -664,7 +439,7 @@ class EventEgoPoseEstimation(LightningModule):
         logger.info(msg)
 
     
-    def eval_step(self, batch, batch_idx, prefix, vis=False):
+    def eval_step(self, batch, batch_idx):
         self.model.eval()
 
         self.model.kalman_filter.reset()
@@ -676,240 +451,81 @@ class EventEgoPoseEstimation(LightningModule):
             3: None
         }
 
-        if vis == False:
+        # for idx in range(0, self.fixed_sequence_length, self.truncated_bptt_steps):
+        start_time = time.time()
 
-            # for idx in range(0, self.fixed_sequence_length, self.truncated_bptt_steps):
-            start_time = time.time()
+        # start = idx
+        start = 0
 
-            # start = idx
-            start = 0
+        # end = start + self.truncated_bptt_steps
+        end = start + len(batch)
 
-            # end = start + self.truncated_bptt_steps
-            end = start + len(batch)
-
-            data_batch = batch[start:end]
-
-
-            # batch_d = torch.utils.data._utils.collate.default_collate([data_batch])
-            batch_d = batch
-
-            inps, outputs, gt_hms, gt_abs_poses_og, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index, pose_filename, valid_joints = compute_fn_v4(self.model, batch_d, prev_s5_states)
-            # inps, outputs, gt_hms, gt_abs_poses_og, gt_seg, gt_j2d, vis_j2d, vis_j3d, valid_j3d, valid_seg, frame_index, vis_ja= compute_fn_new(self.model, batch)
-            
-
-            # T, B = self.temporal_steps, self.batch_size
-            
-            # gt_abs_poses_og = gt_abs_poses_og.reshape(T, B, 16, 3)
-            # gt_seg = gt_seg.reshape(T, B, 1, 192, 256)
-            # vis_j3d = vis_j3d.reshape(T, B, 16, 1)
-            # vis_j2d = vis_j2d.reshape(T, B, 16, 1)
-            # vis_ja = vis_ja.reshape(T, B, 16, 1)
-            # valid_j3d = valid_j3d.reshape(T, B, 16, 1)
+        data_batch = batch[start:end]
+        batch_d = batch
 
 
-            pred_abs_poses_t = outputs['abs_poses'] * 1000 # scale to mm  (previous pose + current delta + kalman filtering)
-            # pred_abs_poses_t = outputs['poses_old'] * 1000 # previous pose + current delta + no kalman filtering
-            # pred_abs_poses_t = outputs['all_abs_poses'] * 1000 # only current predicted abs pose
-            gt_j3d_t = gt_abs_poses_og * 1000 # scale to mm
+        inps, outputs, meta_data = compute_fn_v4(self.model, batch_d, prev_s5_states, augmentation=False)
 
-            pred_delta_poses = outputs['delta_poses'] * 1000 
+        gt_abs_poses = meta_data['gt_j3d']
+        vis_j3d = meta_data['vis_j3d']
+        valid_j3d = meta_data['valid_j3d']
 
-            # # Apply Kalman filtering to reduce drift
-            # confidence_estimator = None  # Use default confidence values
-            # # Alternatively, create a more sophisticated confidence estimator
-            # # confidence_estimator = lambda abs_pose, delta: (0.7, 0.3)  # Example fixed confidence
+        pred_abs_poses_t = outputs['abs_poses'] * 1000 # scale to mm
+        gt_j3d_t = gt_abs_poses * 1000 # scale to mm
 
-            # filtered_poses = apply_kalman_filtering(
-            #     pred_abs_poses_t, 
-            #     pred_delta_poses, 
-            #     confidence_estimator
-            # )
-
-            # ----- Apply Kalman filtering to correct drift -----
-            # We apply the filter per sequence (per batch element). Adjust dt if needed.
-            # dt = 1/1000.  # Change this if your sequence has a different time step.
-            # # Q_scale = 3.0
-            # # R_scale = 1.0
-
-            # Q_scale = 5.0
-            # R_scale = 0.1
-
-            # T, B, J, _ = pred_abs_poses_t.shape
-            # fused_abs_poses = torch.zeros_like(pred_abs_poses_t)
-            # # Loop over batch elements and apply the filter on each sequence
-            # for b in range(B):
-            #     # Convert the T x J x 3 tensor to numpy array.
-            #     abs_seq = pred_abs_poses_t[:, b, :, :].detach().cpu().numpy()
-            #     # Apply Kalman filter to the sequence.
-            #     filtered_seq = apply_kf_to_sequence(abs_seq, dt=dt, Q_scale=Q_scale, R_scale=R_scale)
-            #     # Convert back to tensor and store.
-            #     fused_abs_poses[:, b, :, :] = torch.from_numpy(filtered_seq).to(pred_abs_poses_t.device)
-
-            # Q_scale = 100.0
-            # R_scale = 10.0
-
-            # T, B, J, _ = pred_abs_poses_t.shape
-            # fused_abs_poses1 = torch.zeros_like(pred_abs_poses_t)
-            # # Loop over batch elements and apply the filter on each sequence
-            # for b in range(B):
-            #     # Convert the T x J x 3 tensor to numpy array.
-            #     abs_seq = pred_abs_poses_t[:, b, :, :].detach().cpu().numpy()
-            #     # Apply Kalman filter to the sequence.
-            #     filtered_seq = apply_kf_to_sequence(abs_seq, dt=dt, Q_scale=Q_scale, R_scale=R_scale)
-            #     # Convert back to tensor and store.
-            #     fused_abs_poses1[:, b, :, :] = torch.from_numpy(filtered_seq).to(pred_abs_poses_t.device)
-
-            # # pred_abs_poses = pred_abs_poses[-1, :, :, :] # use abs poses of last temporal step
-            # # gt_abs_poses = gt_abs_poses[-1, :, :, :]
-
-            # pred_abs_poses = pred_abs_poses_t[-1, :, :, :] # use abs poses of last temporal step
-            # pred_abs_poses = fused_abs_poses[-1, :, :, :] # use abs poses of last temporal step
-
-            # gt_abs_poses = gt_j3d_t[-1, :, :, :]
-            valid_j3d_t = valid_j3d
-
-            pred_abs_poses = pred_abs_poses_t
-            gt_abs_poses = gt_j3d_t
+        pred_abs_poses = pred_abs_poses_t
+        gt_abs_poses = gt_j3d_t
 
 
-            # valid_j3d = valid_j3d[-1, :, :, :]
-            # vis_j3d = vis_j3d[-1, :, :, :]
+        val_loss_j3d = self.criterions['j3d'](pred_abs_poses.unsqueeze(0), gt_abs_poses.unsqueeze(0), vis_j3d.unsqueeze(0) * self.wgt_j3d)
+        self.j3d_loss_val.update(val_loss_j3d, inps.size(0))
+        
+        avg_acc, cnt = accuracy(gt_abs_poses, pred_abs_poses, valid_j3d)
+        self.acc_j3d_val.update(avg_acc, cnt)
+
+        avg_jitter = compute_motion_jitter(pred_abs_poses, gt_abs_poses, valid_j3d)
+        self.jitter_j3d_val.update(avg_jitter, cnt)
+
+        # measure elapsed time
+        self.batch_time.update(time.time() - start_time)
+        end = time.time()
+
+        self.log('val_loss', self.j3d_loss_val.avg, sync_dist=True, batch_size=self.batch_size)
+        self.log('val_acc', self.acc_j3d_val.avg, sync_dist=True, batch_size=self.batch_size)
+        self.log('val_jitter', self.jitter_j3d_val.avg, sync_dist=True, batch_size=self.batch_size)
 
 
-            gt_j3d = gt_j3d_t.squeeze(1)
-            # valid_j3d = valid_j3d.squeeze(1)
-
-
-            val_loss_j3d = self.criterions['j3d'](pred_abs_poses.unsqueeze(0), gt_abs_poses.unsqueeze(0), vis_j3d.unsqueeze(0) * self.wgt_j3d)
-            self.j3d_loss_val.update(val_loss_j3d, inps.size(0))
-
-            # process = psutil.Process(os.getpid())
-            # # Convert bytes to MB
-            # memory_usage_mb = process.memory_info().rss / (1024 ** 2)
-
-            # print(f"Current process memory usage: {memory_usage_mb:.2f} MB")
-
-            # pred_abs_poses_no_kf = outputs['poses_old'] * 1000 # previous pose + current delta + no kalman filtering
-            # pred_abs_poses_only = outputs['all_abs_poses'] * 1000 # only current predicted abs pose
-
-            # a_abs_only = []
-            # a_w_kf = []
-            # a_wo_kf = []
-            # import pdb; pdb.set_trace()
-
-            # for i in range(len(batch)):
-            #     # acc_no_pf, _ = accuracy(gt_abs_poses[i], pred_abs_poses_no_kf[i], valid_j3d[i])
-            #     # acc_only_abs, _ = accuracy(gt_abs_poses[i], pred_abs_poses_only[i], valid_j3d[i])
-
-            #     # avg_acc, cnt = accuracy(gt_abs_poses[i], pred_abs_poses[i], valid_j3d[i])
-            #     # a_abs_only.append(acc_only_abs)
-            #     # a_w_kf.append(avg_acc)
-            #     # a_wo_kf.append(acc_no_pf)
-
-            #     color = dump_sketelon_image(gt_abs_poses_og[i][0].detach(), outputs['abs_poses'][i][0].detach(), f"./visualizations/new_dataloader")
-            #     voxel_image = save_augmented_data(inps[i], 'test')
-            #     concatenated_image = create_concatenated_image(color, voxel_image)
-            #     output_path = f"./visualizations/output_for_vis_lnes/{i}.png"
-            #     cv2.imwrite(output_path, concatenated_image)
-
-            # color = dump_sketelon_image(gt_abs_poses_og[i][0].detach(), outputs['abs_poses'][i][0].detach(), f"./visualizations/new_dataloader")
-            # voxel_image = save_augmented_data(inps[i], 'test')
-            # concatenated_image = create_concatenated_image(color, voxel_image)
-            # output_path = f"./visualizations/output_for_vis_lnes/{i}.png"
-            # cv2.imwrite(output_path, concatenated_image)
-
-
-            # avg_acc = torch.Tensor(a_w_kf)
-            # acc_only_abs = torch.Tensor(a_abs_only)
-            # acc_no_pf = torch.Tensor(a_wo_kf)
-
-            # all_pred_abs = outputs['all_abs_poses'] * 1000
-            # poses_old = outputs['poses_old'] * 1000
-            # # re_poses = outputs['re_poses'] * 1000
-            # abs_avg_acc_all_steps, cnt_0 = accuracy_test(gt_j3d_t[:, 0, ...], all_pred_abs[:, 0, ...], valid_j3d_t[:, 0, ...])
-            # delta_avg_acc_all_steps, cnt_0 = accuracy_test(gt_j3d_t[:, 0, ...], pred_abs_poses_t[:, 0, ...], valid_j3d_t[:, 0, ...])
-            # # reposes_avg_acc_all_steps, cnt_0 = accuracy_test(gt_j3d_t[:, 0, ...], re_poses[:, 0, ...], valid_j3d_t[:, 0, ...])
-
-            # pose_old_avg_acc_all_steps, cnt_0 = accuracy_test(gt_j3d_t[:, 0, ...], poses_old[:, 0, ...], valid_j3d_t[:, 0, ...])
-
-
-            # filtered_avg_acc_all_steps, cnt_0 = accuracy_test(gt_j3d_t[:, 0, ...], fused_abs_poses[:, 0, ...], valid_j3d_t[:, 0, ...])
-            # filtered_avg_acc_all_steps_q10, cnt_0 = accuracy_test(gt_j3d_t[:, 0, ...], fused_abs_poses1[:, 0, ...], valid_j3d_t[:, 0, ...])
-
-            # import pdb; pdb.set_trace()
-
-            # seq_end = 20
-
-            # acc_no_pf, _ = accuracy(gt_abs_poses, pred_abs_poses_no_kf, valid_j3d)
-            # acc_only_abs, _ = accuracy(gt_abs_poses, pred_abs_poses_only, valid_j3d)
-
-            # avg_acc, cnt = accuracy(gt_abs_poses, pred_abs_poses, valid_j3d)
-
-
-            # drift_plot(avg_acc[:seq_end], acc_only_abs[:seq_end], acc_no_pf[:seq_end])
-
-            # import pdb; pdb.set_trace()
-
-
-            # print("Input shape : ", inp.shape)
-            # avg_acc, cnt = accuracy_with_vis(gt_abs_poses, pred_abs_poses, valid_j3d, batch_idx, outputs['abs_poses'].detach(), gt_abs_poses_og.detach(), outputs['voxel_representations'], pose_filename, frame_index)
-
-            # for i in range(gt_abs_poses_og.size(0)):
-            #     dump_sketelon_image(gt_abs_poses_og[i][0].detach(), outputs['abs_poses'][i][0].detach(), f"./visualizations/new_dataloader/{batch_idx}_bin-{i}_mpjpe_{avg_acc.item()}.png")
-            
-            avg_acc, cnt = accuracy(gt_abs_poses, pred_abs_poses, valid_j3d)
-            self.acc_j3d_val.update(avg_acc, cnt)
-
-            avg_jitter = compute_motion_jitter(pred_abs_poses, gt_abs_poses, valid_j3d)
-            self.jitter_j3d_val.update(avg_jitter, cnt)
-
-
-            
-            # measure elapsed time
-            self.batch_time.update(time.time() - start_time)
-            end = time.time()
-
-            if prefix == 'test':
-                self.all_preds_j3d.append(pred_abs_poses.detach().cpu())
-                self.all_gt_j3ds.append(gt_abs_poses.detach().cpu())
-                self.all_vis_j3d.append(valid_j3d.detach().cpu())
-                self.all_frame_indices.append(frame_index.detach().cpu())
-
-
-            self.log('val_loss', self.j3d_loss_val.avg, sync_dist=True, batch_size=self.batch_size)
-            self.log('val_acc', self.acc_j3d_val.avg, sync_dist=True, batch_size=self.batch_size)
-            self.log('val_jitter', self.jitter_j3d_val.avg, sync_dist=True, batch_size=self.batch_size)
-
-            # if batch_idx % cfg.PRINT_FREQ == 0:
-
-            self.global_val_steps = self.global_val_steps + 1
-            
-            msg = 'Test: [{0}/{1}]\t' \
-                'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t' \
-                'MPJPE {acc.val:.4f} ({acc.avg:.4f})\t' \
-                'Jitter {jitter.val:.4f} ({jitter.avg:.4f})\t' \
-                'Val loss  {val_loss.val:.4f} ({val_loss.avg:.4f})\t'.format(
-                    batch_idx, self.trainer.num_val_batches, batch_time=self.batch_time,
-                    acc=self.acc_j3d_val, val_loss=self.j3d_loss_val, jitter=self.jitter_j3d_val)
-            logger.info(msg)
-
-        elif prefix == "test" and vis == True:
-            global_steps=batch_idx
-            tb_log_dir = self.logger.log_dir
-            test_and_generate_vis(cfg, self.model, self.test_dataset, tb_log_dir, global_steps)
+        self.global_val_steps = self.global_val_steps + 1
+        
+        msg = 'Test: [{0}/{1}]\t' \
+            'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t' \
+            'MPJPE {acc.val:.4f} ({acc.avg:.4f})\t' \
+            'Jitter {jitter.val:.4f} ({jitter.avg:.4f})\t' \
+            'Val loss  {val_loss.val:.4f} ({val_loss.avg:.4f})\t'.format(
+                batch_idx, self.trainer.num_val_batches, batch_time=self.batch_time,
+                acc=self.acc_j3d_val, val_loss=self.j3d_loss_val, jitter=self.jitter_j3d_val)
+        logger.info(msg)
 
     def validation_step(self, batch, batch_idx):
-        return self.eval_step(batch, batch_idx, "val")
+        return self.eval_step(batch, batch_idx)
 
     def test_step(self, batch, batch_idx):
-        return self.test_step_sequence(batch, batch_idx, "test", vis=False)
-    
+        return self.test_step_sequence(batch, batch_idx, "test")
 
-    # def on_train_batch_start(self, batch, batch_idx):
-    #     if self.s5_states is not None:
-    #         self.s5_states.detach()
-    #         self.s5_states = None
+    def visualize(self, lnes: np.ndarray):
+        # if torch.Tensor, convert
+        if isinstance(lnes, torch.Tensor):
+            # assume shape (C, H, W)
+            lnes = lnes.permute(1, 2, 0).detach().cpu().numpy()
+        lnes = (lnes.copy() * 255).astype(np.uint8)
+                    
+        h, w = lnes.shape[:2]
+        b = lnes[..., :1]      # channel 0 → blue
+        r = lnes[..., 1:]      # channel 1 → red
+        g = np.zeros((h, w, 1), dtype=np.uint8)  # green = 0
 
+        rgb = np.concatenate([r, g, b], axis=2)
+        return rgb
 
     def _log_metrics(self):
         self.log('train_total_loss', self.losses.avg)
@@ -929,10 +545,7 @@ class EventEgoPoseEstimation(LightningModule):
 
     def _log_memory_stats(self):
         memory_stats = torch.cuda.memory_stats("cuda:0")
-        # logger.info("Batch shape: {}".format(inp.shape))
         logger.info(f"Current allocated memory: {memory_stats['allocated_bytes.all.current'] / (1024 ** 2):.2f} MB")
-        # logger.info(f"Peak allocated memory: {memory_stats['allocated_bytes.all.peak'] / (1024 ** 2):.2f} MB")
-        # logger.info(f"Current reserved memory: {memory_stats['reserved_bytes.all.current'] / (1024 ** 2):.2f} MB")
         logger.info(f"Peak reserved memory: {memory_stats['reserved_bytes.all.peak'] / (1024 ** 2):.2f} MB")
     
     def _update_metrics(self, loss, loss_angle, loss_j3d_delta, loss_seg, loss_j3d, loss_j2d, 
@@ -999,20 +612,6 @@ class EventEgoPoseEstimation(LightningModule):
         self.losses.reset()
         self.acc.reset()
 
-
-        # if self.training_type == 'finetune':
-        #     with torch.no_grad():
-        #         default_process_var = 1e-3
-        #         default_measurement_var = 1e-2
-        #         self.model.kalman_filter.log_process_var.data.fill_(np.log(default_process_var))
-        #         self.model.kalman_filter.log_measurement_var.data.fill_(np.log(default_measurement_var))
-
-        # if self.lr:
-        #     # Overwrite learning rate after running LearningRateFinder
-        #     for optimizer in self.trainer.optimizers:
-        #         for param_group in optimizer.param_groups:
-        #             param_group["lr"] = self.lr
-
     def configure_optimizers(self):
         optimizer = None
 
@@ -1028,120 +627,6 @@ class EventEgoPoseEstimation(LightningModule):
         )
 
         return [optimizer], [lr_scheduler]
-
-def test_and_generate_vis(cfg, model, test_dataset, tb_log_dir, global_steps):
-    fps = 30
-    seq_time_in_sec = 60
-
-    seq_len = seq_time_in_sec * fps
-    data_len = len(test_dataset)
-
-    # start = np.random.randint(0, data_len - cfg.DATASET.TEMPORAL_STEPS)
-    start = np.random.randint(0, data_len - seq_len)
-    stop = min(start + seq_len, data_len)
-
-    tb_log_dir = Path(tb_log_dir)
-    video_path = str(tb_log_dir / f'{global_steps}.mp4')
-
-    video = cv2.VideoWriter(video_path, cv2.VideoWriter_fourcc(*'mp4v'), fps, (400 * 1, 300 * 1))
-
-    model.eval()
-
-    print(f"Path : {video_path}")
-    print(f"Generating video from {start} to {stop}")
-    for i in range(start, stop):
-        gt_j3d = []
-        inps = []
-        gt_hms = []
-        
-        data, meta = test_dataset[i]
-
-        inp = data['x']
-
-        gt_j3d_ = data['j3d']
-
-        inps.append(inp[None, None, ...])
-        gt_j3d.append(gt_j3d_[None, ...])
-        # gt_hms.append(data['hms'][None, ...])
-
-        inps = torch.cat(inps, dim=0).cuda()
-        
-        with torch.no_grad():
-            outputs = model(inps)
-
-        pred_j3ds = outputs['j3d'].detach()
-        # preds_hms = outputs['hms'].detach()
-        # pred_j2ds = get_j2d_from_hms(cfg, preds_hms)
-        
-        gt_j3ds = torch.cat(gt_j3d, dim=0).detach()
-        # gt_hms = torch.cat(gt_hms, dim=0).detach()
-        # gt_hm_j2ds = get_j2d_from_hms(cfg, gt_hms)
-
-        # representation = outputs['representation']
-        # representation_image = create_image(representation)
-
-        T, B, N, C = inps.shape
-
-        for i in range(T):
-            gt_j3d = gt_j3ds[i]
-            # gt_hm = gt_hms[i]
-            # gt_hm_j2d = gt_hm_j2ds[i]
-            
-            pred_j3d = pred_j3ds[i]
-
-            # if gt_j3d.dim() == 0 or pred_j3d.dim() == 0:
-            #     continue
-
-
-            # TODO: Include all bins in the visualization
-            # for j in range(len(gt_j3d)):
-
-            # try:
-            # gt_j3d = gt_j3d[j]
-            # pred_j3d = pred_j3d[j]
-            # except:
-            #     import pdb; pdb.set_trace()
-
-
-            # import pdb; pdb.set_trace()
-            gt_j3d = gt_j3d[-1, :, :]
-            pred_j3d = pred_j3d[-1, :, :]
-
-            # pred_j2d = pred_j2ds[i]
-            # pred_hm = preds_hms[i]
-
-            # inp = representation_image
-            # inp = inp[i]
-            # grid = torchvision.utils.make_grid(inp)
-            # inp = grid.mul(255).clamp(0, 255).byte().permute(1, 2, 0).detach()
-        
-
-            # pred_hm_image = plot_heatmaps(inp, pred_hm)    
-            # gt_hm_image = plot_heatmaps(inp, gt_hm)
-
-            # inp = inp.astype(np.uint8)
-
-            # inp_w_gt_hm_j2d = Skeleton.draw_2d_skeleton(inp, gt_hm_j2d, lines=True)
-            # inp = Skeleton.draw_2d_skeleton(inp, pred_j2d, lines=True)
-                    
-            color = generate_skeleton_image(gt_j3d, pred_j3d)
-            color = color[..., ::-1]
-            
-            color = cv2.resize(color, (400, 300))
-            # inp = cv2.resize(inp, (400, 300))
-            # pred_hm_image = cv2.resize(pred_hm_image, (400, 300))
-            # gt_hm_image = cv2.resize(gt_hm_image, (400, 300))
-            # inp_w_gt_hm_j2d = cv2.resize(inp_w_gt_hm_j2d, (400, 300))           
-            
-            # hstack1 = np.concatenate([inp, color], axis=1)
-            # hstack2 = np.concatenate([gt_hm_image, pred_hm_image], axis=1)
-            # hstack3 = np.concatenate([inp_w_gt_hm_j2d, np.zeros_like(inp_w_gt_hm_j2d)], axis=1)
-            
-            # vstack = np.concatenate([hstack1, hstack2, hstack3], axis=0)
-            video.write(color)
-            # video.write(vstack)
-
-    video.release()
 
 class EvaluateCallback(Callback):
     def __init__(self):
