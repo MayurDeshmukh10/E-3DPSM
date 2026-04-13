@@ -2,7 +2,6 @@ import os
 import time
 from typing import Optional
 
-from EventEgoPoseEstimation import model
 import torch
 from torch.utils.data import Dataset
 import torch.nn.parallel
@@ -17,45 +16,35 @@ import numpy as np
 
 import cv2
 
-from pathlib import Path
-
-import matplotlib.pyplot as plt
-
-
 from EventEgoPoseEstimation.model import EgoHPE
 
 from EventEgoPoseEstimation.dataset.dataset_utils import camera_to_j2d_batch
 
-from EventEgoPoseEstimation.dataset import EgoEvent, EgoEventv2, AugmentedEgoEvent, TemoralWrapper, CombinedEgoEvent, EgoEventSequence
+from EventEgoPoseEstimation.dataset import EgoEvent, AugmentedEgoEvent, TemoralWrapper, EgoEventSequence
 
 from EventEgoPoseEstimation.utils.utils import AverageMeter, create_logger
 
 from configs.settings import config as cfg
 
-from EventEgoPoseEstimation.core.function import _print_name_value, compute_fn_v3, compute_fn_v4
+from EventEgoPoseEstimation.core.function import log_metric_table, prepare_batch_and_forward
 
 from EventEgoPoseEstimation.core.evaluate import accuracy, compute_motion_jitter
 
-from EventEgoPoseEstimation.core.loss import SegmentationLoss, BoneLengthLoss, JointMSELoss, HeatMapJointsMSELoss, BoneOrientationLoss, BoneLoss
+from EventEgoPoseEstimation.core.loss import BoneLengthLoss, JointMSELoss, BoneOrientationLoss, BoneLoss
 
-from EventEgoPoseEstimation.utils.vis import generate_skeleton, save_pose_images, save_debug_images, save_debug_3d_joints, save_debug_segmenation, save_debug_eros, generate_skeleton_image, dump_sketelon_image, drift_plot
-
-from EventEgoPoseEstimation.core.inference import get_j2d_from_hms
-from EventEgoPoseEstimation.dataset.dataset_utils import event_augmentation, save_augmented_data
-
-
-import ocam
+from EventEgoPoseEstimation.utils.vis import dump_sketelon_image
 
 logger, final_output_dir, tb_log_dir = create_logger(
         cfg, cfg.EXP_NAME, 'train')
 
 torch.set_float32_matmul_precision('medium')
 
-import os
-
+import ocam
 
 SAVE_VISUALIZATION = False
 VISUALIZATION_PATH = '/scratch/inf0/user/mdeshmuk/visualization/EE3D-R/ours'
+OCAM_INTRINSICS_PATH = '/CT/EventEgo3Dv2/work/egoposeformer/pose_estimation/models/utils/intrinsics.json'
+FINAL_RESULTS_DIR = '/CT/EventEgo3Dv2/work/code_variations/dp_att_lkf_lnes_update_deform_att/Final_results'
 
 
 class EventEgoPoseEstimation(LightningModule):
@@ -80,20 +69,16 @@ class EventEgoPoseEstimation(LightningModule):
         
         super().__init__()
 
-        assert dataset_type in ["real", "synthetic"]
+        assert dataset_type in ["real", "in_the_wild"]
 
         self.dataset_type = dataset_type
 
-        self.syn_preprocessed_input_path = dataset['syn_preprocessed_input_path']
         self.real_preprocessed_input_path = dataset['real_preprocessed_input_path']
-        self.syn_dataset_root_path = dataset['syn_dataset_root_path']
-        self.syn_test_dataset_root_path = dataset['syn_test_dataset_root_path']
         self.real_dataset_root_path = dataset['real_dataset_root_path']
         self.bg_dataset_root_path = dataset['bg_dataset_root_path']
         self.bg_preprocessed_input_path = dataset['bg_preprocessed_input_path']
         self.wild_preprocessed_input_path = dataset['wild_preprocessed_input_path']
         self.wild_dataset_root_path = dataset['wild_dataset_root_path']
-
 
         self.training_type = training_type
 
@@ -157,7 +142,7 @@ class EventEgoPoseEstimation(LightningModule):
         self.all_frame_indices = []
         self.all_occluded_joints = []
         self.total_count = 0
-        self.per_joint_count = torch.tensor([ 0.,  0.,  0.,  0.,  0.,  0.,  0.,  0.,  0., 0., 0.,  0.,  0., 0., 0.,  0.], device='cuda:0')
+        self.per_joint_count = torch.zeros(16, device='cuda:0')
 
         self.global_steps = 0
         self.global_val_steps = 0
@@ -175,7 +160,7 @@ class EventEgoPoseEstimation(LightningModule):
 
         self.s5_states = None
 
-        self.ocam_model = ocam.to_ocam_model('/CT/EventEgo3Dv2/work/egoposeformer/pose_estimation/models/utils/intrinsics.json')
+        self.ocam_model = ocam.to_ocam_model(OCAM_INTRINSICS_PATH)
 
         self.automatic_optimization = True
 
@@ -190,79 +175,89 @@ class EventEgoPoseEstimation(LightningModule):
 
     def forward(self, x):
         return self.model(x)
+
+    def _create_empty_s5_state(self):
+        return {
+            0: None,
+            1: None,
+            2: None,
+            3: None,
+        }
+
+    def _get_data_roots(self):
+        if self.training_type == 'train':
+            return self.real_preprocessed_input_path, self.real_dataset_root_path
+        if self.training_type == 'finetuning':
+            return self.wild_preprocessed_input_path, self.wild_dataset_root_path
+        raise AssertionError(f"Invalid training type: {self.training_type}")
+
+    def _build_augmented_dataset(self, preprocessed_input_path, dataset_root_path, split, finetune=False):
+        base_dataset = EgoEvent(
+            cfg,
+            preprocessed_input_path,
+            dataset_root_path,
+            temporal_bins=self.temporal_bins,
+            split=split,
+            finetune=finetune,
+        )
+
+        if not self.use_bg_augmentation:
+            return base_dataset
+
+        return AugmentedEgoEvent(
+            cfg,
+            base_dataset,
+            bg_data_root=self.bg_dataset_root_path,
+            bg_preprocessed_root=self.bg_preprocessed_input_path,
+            split='finetune',
+            temporal_bins=self.temporal_bins,
+        )
     
     def setup(self, stage: str):
-    
         if stage == "fit":
-
             if self.training_type == 'train':
                 logger.info("Training type: Finetune")
 
-                finetune_dataset = AugmentedEgoEvent(
-                                    cfg,
-                                    EgoEvent(cfg, self.real_preprocessed_input_path, self.real_dataset_root_path, temporal_bins=self.temporal_bins, split='train', finetune=True),
-                                    bg_data_root=self.bg_dataset_root_path, 
-                                    bg_preprocessed_root=self.bg_preprocessed_input_path,
-                                    split='finetune',
-                                    temporal_bins=self.temporal_bins)
-                
-                # cfg.DATASET.TYPE = 'Real'
-                eval_dataset = AugmentedEgoEvent(
-                                    cfg,
-                                    EgoEvent(cfg, self.real_preprocessed_input_path, self.real_dataset_root_path, temporal_bins=self.temporal_bins, split='test'),
-                                    bg_data_root=self.bg_dataset_root_path, 
-                                    bg_preprocessed_root=self.bg_preprocessed_input_path,
-                                    split='finetune',
-                                    temporal_bins=self.temporal_bins)
+            preprocessed_input_path, dataset_root_path = self._get_data_roots()
+            train_dataset = self._build_augmented_dataset(
+                preprocessed_input_path,
+                dataset_root_path,
+                split='train',
+                finetune=True,
+            )
+            eval_dataset = self._build_augmented_dataset(
+                preprocessed_input_path,
+                dataset_root_path,
+                split='test',
+            )
 
-                self.eval_dataset = TemoralWrapper(eval_dataset, self.temporal_steps, split='test', sample_step=self.sample_step)
-                self.train_dataset = TemoralWrapper(finetune_dataset, self.temporal_steps, split='train', sample_step=self.sample_step)
+            self.train_dataset = TemoralWrapper(
+                train_dataset,
+                self.temporal_steps,
+                split='train',
+                sample_step=self.sample_step,
+            )
+            self.eval_dataset = TemoralWrapper(
+                eval_dataset,
+                self.temporal_steps,
+                split='test',
+                sample_step=self.sample_step,
+            )
 
-            
-            elif self.training_type == 'finetuning':
-
-                finetune_dataset = AugmentedEgoEvent(
-                                    cfg,
-                                    EgoEvent(cfg, self.wild_preprocessed_input_path, self.wild_dataset_root_path, temporal_bins=self.temporal_bins, split='train', finetune=True),
-                                    bg_data_root=self.bg_dataset_root_path, 
-                                    bg_preprocessed_root=self.bg_preprocessed_input_path,
-                                    split='finetune',
-                                    temporal_bins=self.temporal_bins)
-                
-                # cfg.DATASET.TYPE = 'Real'
-                eval_dataset = AugmentedEgoEvent(
-                                    cfg,
-                                    EgoEvent(cfg, self.wild_preprocessed_input_path, self.wild_dataset_root_path, temporal_bins=self.temporal_bins, split='test'),
-                                    bg_data_root=self.bg_dataset_root_path, 
-                                    bg_preprocessed_root=self.bg_preprocessed_input_path,
-                                    split='finetune',
-                                    temporal_bins=self.temporal_bins)
-
-                self.eval_dataset = TemoralWrapper(eval_dataset, self.temporal_steps, split='test', sample_step=self.sample_step)
-                self.train_dataset = TemoralWrapper(finetune_dataset, self.temporal_steps, split='train', sample_step=self.sample_step)
-            else:
-                assert False, f"Invalid training type: {self.training_type}"
-
-        if stage == "test" or stage == "predict":
-            if self.training_type == 'train':
-                test_dataset = self.real_dataset_root_path
-                test_preprocessed_input = self.real_preprocessed_input_path
-            elif self.training_type == 'finetuning':
-                test_dataset = self.wild_dataset_root_path
-                test_preprocessed_input = self.wild_preprocessed_input_path
-            else:
-                assert False, f"Invalid training type: {self.training_type}"
-            
-            self.test_dataset = EgoEventSequence(cfg, 
-                                        test_preprocessed_input,
-                                        test_dataset,
-                                        self.bg_preprocessed_input_path,
-                                        self.bg_dataset_root_path,
-                                        training_type=self.training_type,
-                                        use_bg_augmentation=False,
-                                        fixed_sequence_length=self.fixed_sequence_length,
-                                        temporal_bins=self.temporal_bins, 
-                                        split='test')
+        if stage in {"test", "predict"}:
+            test_preprocessed_input, test_dataset = self._get_data_roots()
+            self.test_dataset = EgoEventSequence(
+                cfg,
+                test_preprocessed_input,
+                test_dataset,
+                self.bg_preprocessed_input_path,
+                self.bg_dataset_root_path,
+                training_type=self.training_type,
+                use_bg_augmentation=False,
+                fixed_sequence_length=self.fixed_sequence_length,
+                temporal_bins=self.temporal_bins,
+                split='test',
+            )
 
 
     def train_dataloader(self):
@@ -270,8 +265,7 @@ class EventEgoPoseEstimation(LightningModule):
         dataloader = torch.utils.data.DataLoader(
             self.train_dataset,
             batch_size=self.batch_size,
-            # collate_fn=collate_variable_size,
-            shuffle=True, # TODO: change this
+            shuffle=True,
             num_workers=self.workers,
             pin_memory=True,
             drop_last=True
@@ -280,12 +274,9 @@ class EventEgoPoseEstimation(LightningModule):
         return dataloader
 
     def val_dataloader(self):
-        dataloader =  torch.utils.data.DataLoader(
+        dataloader = torch.utils.data.DataLoader(
             self.eval_dataset,
-            # batch_size=1,
             batch_size=self.batch_size,
-            # collate_fn=collate_variable_size,
-            # collate_fn=lambda x: x[0],
             num_workers=self.workers,
             pin_memory=True,
             drop_last=True
@@ -294,13 +285,12 @@ class EventEgoPoseEstimation(LightningModule):
         return dataloader
 
     def test_dataloader(self):
-        dataloader =  torch.utils.data.DataLoader(
+        dataloader = torch.utils.data.DataLoader(
             self.test_dataset,
             batch_size=1,
-            # batch_size=self.batch_size,
             collate_fn=lambda x: x[0],
             num_workers=self.workers,
-            pin_memory=True, # TODO: check this
+            pin_memory=True,
             drop_last=True
         )
         self.val_dataloader_len = len(dataloader)
@@ -316,14 +306,9 @@ class EventEgoPoseEstimation(LightningModule):
 
         self.model.kalman_filter.reset()
 
-        prev_s5_states = {
-            0: None,
-            1: None,
-            2: None,
-            3: None
-        }
+        prev_s5_states = self._create_empty_s5_state()
 
-        inps, outputs, meta_data = compute_fn_v4(self.model, batch, prev_s5_states, augmentation=True)
+        inps, outputs, meta_data = prepare_batch_and_forward(self.model, batch, prev_s5_states, augmentation=self.use_bg_augmentation)
 
         gt_poses = meta_data['gt_j3d']
         gt_j2d = meta_data['gt_j2d']
@@ -332,7 +317,9 @@ class EventEgoPoseEstimation(LightningModule):
         valid_j3d = meta_data['valid_j3d']
         vis_ja = meta_data['vis_ja']
 
-        pred_poses_2d = camera_to_j2d_batch(outputs['abs_poses'].view(-1, 16, 3), self.image_size, self.ocam_model)
+        pred_poses_2d = camera_to_j2d_batch(
+            outputs['abs_poses'].view(-1, 16, 3), self.image_size, self.ocam_model
+        )
         gt_poses_2d = camera_to_j2d_batch(gt_poses.view(-1, 16, 3), self.image_size, self.ocam_model)
         pred_poses_2d = pred_poses_2d.reshape(outputs['abs_poses'].shape[0], outputs['abs_poses'].shape[1], 16, 2)
         gt_poses_2d = gt_poses_2d.reshape(gt_poses.shape[0], gt_poses.shape[1], 16, 2)
@@ -340,18 +327,21 @@ class EventEgoPoseEstimation(LightningModule):
         gt_poses = gt_poses  * 1000 # scale to mm
         pred_poses = outputs['abs_poses'] * 1000 # scale to mm
         pred_delta_poses = outputs['delta_poses'] * 1000 # scale to mm
-        valid_seg = valid_seg.view(self.temporal_steps, self.batch_size, 1, 1, 1)
         gt_delta_poses = gt_poses[1:, :, :, :] - gt_poses[:-1, :, :, :]
         
         s5_states = outputs['s5_states']
         for stage, s5_state in s5_states.items():
             s5_state.detach()
 
-        loss_j3d_delta = self.criterions['delta_j3d'](pred_delta_poses, gt_delta_poses, vis_j3d[1:, :] * self.wgt_j3d_delta)
+        loss_j3d_delta = self.criterions['delta_j3d'](
+            pred_delta_poses, gt_delta_poses, vis_j3d[1:, :] * self.wgt_j3d_delta
+        )
         loss_j3d = self.criterions['j3d'](pred_poses, gt_poses, vis_j3d * self.wgt_j3d)
         loss_j2d = self.criterions['j2d'](pred_poses_2d, gt_poses_2d, vis_j2d * self.wgt_j2d)
         loss_bone_length = self.criterions['bone_length'](pred_poses, gt_poses, vis_j3d * self.wgt_bone_length)
-        loss_angle = self.criterions['bone_loss'](pred_poses, gt_poses, vis_ja * self.wgt_bone_angle, vis_ja * self.wgt_bone_length)
+        loss_angle = self.criterions['bone_loss'](
+            pred_poses, gt_poses, vis_ja * self.wgt_bone_angle, vis_ja * self.wgt_bone_length
+        )
 
         loss_seg = 0
 
@@ -373,19 +363,15 @@ class EventEgoPoseEstimation(LightningModule):
         model.eval()
         
         with torch.no_grad():
-            inps, outputs, meta_data = compute_fn_v4(model, batch, s5_state, augmentation=False)
+            inps, outputs, meta_data = prepare_batch_and_forward(model, batch, s5_state, augmentation=False)
         
-        gt_abs_poses = meta_data['gt_j3d'] * 1000.0
+        gt_abs_poses = meta_data['gt_j3d'] * 1000.0 # scale to mm
         valid_j3d = meta_data['valid_j3d']
         valid_joints = meta_data['valid_joints']
         frame_index = meta_data['frame_index']
         vis_j3d = meta_data['vis_j3d']
 
         pred_abs_poses = outputs['abs_poses'] * 1000 # scale to mm
-        
-        # gt_abs_poses = gt_abs_poses_og * 1000 # scale to mm
-        # valid_j3d = valid_j3d
-
         s5_state = outputs['s5_states']
 
         val_loss_j3d = self.criterions['j3d'](pred_abs_poses.unsqueeze(0), gt_abs_poses.unsqueeze(0), vis_j3d.unsqueeze(0) * self.wgt_j3d)
@@ -444,27 +430,12 @@ class EventEgoPoseEstimation(LightningModule):
 
         self.model.kalman_filter.reset()
 
-        prev_s5_states = {
-            0: None,
-            1: None,
-            2: None,
-            3: None
-        }
-
-        # for idx in range(0, self.fixed_sequence_length, self.truncated_bptt_steps):
+        prev_s5_states = self._create_empty_s5_state()
         start_time = time.time()
-
-        # start = idx
-        start = 0
-
-        # end = start + self.truncated_bptt_steps
-        end = start + len(batch)
-
-        data_batch = batch[start:end]
         batch_d = batch
 
 
-        inps, outputs, meta_data = compute_fn_v4(self.model, batch_d, prev_s5_states, augmentation=False)
+        inps, outputs, meta_data = prepare_batch_and_forward(self.model, batch_d, prev_s5_states, augmentation=False)
 
         gt_abs_poses = meta_data['gt_j3d']
         vis_j3d = meta_data['vis_j3d']
@@ -486,7 +457,6 @@ class EventEgoPoseEstimation(LightningModule):
         avg_jitter = compute_motion_jitter(pred_abs_poses, gt_abs_poses, valid_j3d)
         self.jitter_j3d_val.update(avg_jitter, cnt)
 
-        # measure elapsed time
         self.batch_time.update(time.time() - start_time)
         end = time.time()
 
@@ -533,7 +503,6 @@ class EventEgoPoseEstimation(LightningModule):
         self.log('train_j3d_loss', self.j3d_losses.avg)
         self.log('train_j3d_delta_loss', self.j3d_delta_losses.avg)
         self.log('train_j2d_loss', self.j2d_losses.avg)
-        # self.log('train_heatmap_loss', self.heatmap_losses.avg)
         self.log('train_bone_length_loss', self.bone_length_losses.avg)
         self.log('train_seg_loss', self.seg_losses.avg)
         self.log('train_bone_angle_loss', self.bone_angle_losses.avg)
@@ -545,7 +514,9 @@ class EventEgoPoseEstimation(LightningModule):
 
     def _log_memory_stats(self):
         memory_stats = torch.cuda.memory_stats("cuda:0")
-        logger.info(f"Current allocated memory: {memory_stats['allocated_bytes.all.current'] / (1024 ** 2):.2f} MB")
+        logger.info(
+            f"Current allocated memory: {memory_stats['allocated_bytes.all.current'] / (1024 ** 2):.2f} MB"
+        )
         logger.info(f"Peak reserved memory: {memory_stats['reserved_bytes.all.peak'] / (1024 ** 2):.2f} MB")
     
     def _update_metrics(self, loss, loss_angle, loss_j3d_delta, loss_seg, loss_j3d, loss_j2d, 
@@ -613,8 +584,6 @@ class EventEgoPoseEstimation(LightningModule):
         self.acc.reset()
 
     def configure_optimizers(self):
-        optimizer = None
-
         optimizer = optim.Adam(
             self.model.parameters(),
             lr=self.lr
@@ -650,39 +619,49 @@ class EvaluateCallback(Callback):
         all_frame_indices = np.concatenate(model.all_frame_indices, axis=0)
         all_occluded_joints = np.concatenate(model.all_occluded_joints, axis=0)
 
-        np.save("/CT/EventEgo3Dv2/work/code_variations/dp_att_lkf_lnes_update_deform_att/Final_results/ee3dr_all_preds_j3d.npy", all_preds_j3d)
-        np.save("/CT/EventEgo3Dv2/work/code_variations/dp_att_lkf_lnes_update_deform_att/Final_results/ee3dr_all_gt_j3ds.npy", all_gt_j3ds)
-        np.save("/CT/EventEgo3Dv2/work/code_variations/dp_att_lkf_lnes_update_deform_att/Final_results/ee3dr_all_vis_j3d.npy", all_vis_j3d)
-        np.save("/CT/EventEgo3Dv2/work/code_variations/dp_att_lkf_lnes_update_deform_att/Final_results/ee3dr_all_frame_indices.npy", all_frame_indices)
-
-        # all_frame_indices = np.array(model.all_frame_indices)
+        np.save(f"{FINAL_RESULTS_DIR}/ee3dr_all_preds_j3d.npy", all_preds_j3d)
+        np.save(f"{FINAL_RESULTS_DIR}/ee3dr_all_gt_j3ds.npy", all_gt_j3ds)
+        np.save(f"{FINAL_RESULTS_DIR}/ee3dr_all_vis_j3d.npy", all_vis_j3d)
+        np.save(f"{FINAL_RESULTS_DIR}/ee3dr_all_frame_indices.npy", all_frame_indices)
 
         if model.dataset_type == "real":
-            name_values, _ = dataset.evaluate_dataset(cfg, frame_indices=all_frame_indices, all_gt_j3ds=all_gt_j3ds, all_preds_j3d=all_preds_j3d, all_vis_j3d=all_vis_j3d)
+            name_values, _ = dataset.evaluate_dataset(
+                cfg,
+                frame_indices=all_frame_indices,
+                all_gt_j3ds=all_gt_j3ds,
+                all_preds_j3d=all_preds_j3d,
+                all_vis_j3d=all_vis_j3d,
+            )
 
             model_name = cfg.MODEL.NAME
             print("Error Per Actions : ")
             if isinstance(name_values, list):
                 for name_value in name_values:
-                    _print_name_value(name_value, model_name)
+                    log_metric_table(name_value, model_name)
             else:
-                _print_name_value(name_values, model_name)
+                log_metric_table(name_values, model_name)
 
-        name_values, name_values_occl, _ = dataset.evaluate_joints(cfg, all_gt_j3ds=all_gt_j3ds, all_preds_j3d=all_preds_j3d, all_vis_j3d=all_vis_j3d, all_valid_joints=all_occluded_joints)
+        name_values, name_values_occl, _ = dataset.evaluate_joints(
+            cfg,
+            all_gt_j3ds=all_gt_j3ds,
+            all_preds_j3d=all_preds_j3d,
+            all_vis_j3d=all_vis_j3d,
+            all_valid_joints=all_occluded_joints,
+        )
         model_name = cfg.MODEL.NAME
         print("Error Per Joints : ")
         if isinstance(name_values, list):
             for name_value in name_values:
-                _print_name_value(name_value, model_name)
+                log_metric_table(name_value, model_name)
         else:
-            _print_name_value(name_values, model_name)
+            log_metric_table(name_values, model_name)
 
         print("Occlusion Error Per Joints : ")
         if isinstance(name_values_occl, list):
             for name_value in name_values_occl:
-                _print_name_value(name_value, model_name)
+                log_metric_table(name_value, model_name)
         else:
-            _print_name_value(name_values_occl, model_name)
+            log_metric_table(name_values_occl, model_name)
 
         
         print("Avg Jitter e_smooth : ", model.jitter_j3d_val.avg)
@@ -708,31 +687,15 @@ class EvaluateCallback(Callback):
             for seq_name, seq_range in sequence_range.items():
                 start_index, end_index = seq_range
 
-                # import pdb; pdb.set_trace()
                 current_seq_indices = all_frame_indices >= start_index
                 current_seq_indices = np.logical_and(current_seq_indices, all_frame_indices < end_index)
 
                 gt_j3ds = all_gt_j3ds[current_seq_indices] / 1000.0 # scale to mm
                 preds_j3d = all_preds_j3d[current_seq_indices] / 1000.0 # scale to mm
-                vis_j3d = all_vis_j3d[current_seq_indices]
-                # event_repr = all_event_repr[:, np.newaxis, :][current_seq_indices]
-                # event_repr = all_event_repr[current_seq_indices]
-                frame_indices = all_frame_indices[current_seq_indices]
-
                 os.makedirs(f"{VISUALIZATION_PATH}/{seq_name}", exist_ok=True)
 
 
                 for i in range(gt_j3ds.shape[0]):
                     color = dump_sketelon_image(gt_j3ds[i], preds_j3d[i], "./visualizations/new_dataloader")
-                    # import pdb; pdb.set_trace()
-
-                    # event_image = visualize(event_repr[i].transpose(1, 2, 0))
-                    # event_image = visualize(event_repr[i])
-
-                    # concatenated_image = create_concatenated_image(color, event_image)
-                    # output_path = f"{VISUALIZATION_PATH}/{seq_name}/{i}.png"
-                    # cv2.imwrite(output_path, concatenated_image)
-
-                    # concatenated_image = create_concatenated_image(color, event_image)
                     output_path = f"{VISUALIZATION_PATH}/{seq_name}/{i}.png"
                     cv2.imwrite(output_path, color)

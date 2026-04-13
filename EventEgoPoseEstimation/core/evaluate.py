@@ -1,7 +1,6 @@
 import numpy as np
 import torch
-from EventEgoPoseEstimation.utils.vis import save_pose_images, save_debug_images, save_debug_3d_joints, save_debug_segmenation, save_debug_eros, generate_skeleton_image, dump_sketelon_image
-from EventEgoPoseEstimation.dataset.dataset_utils import event_augmentation, save_augmented_data
+from EventEgoPoseEstimation.utils.vis import dump_sketelon_image
 
 
 def calc_dists(preds, target, normalize):
@@ -83,7 +82,6 @@ def accuracy_test(gt3ds, preds, valid_j3d):
     return joint_error, 10
 
 import cv2
-import numpy as np
 
 def create_concatenated_image(color, voxel_image):
     # # Resize color image to match the height of voxel_image

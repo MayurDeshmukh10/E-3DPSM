@@ -1,8 +1,7 @@
 import cv2
 import os
 import platform
-import os
-import torch.multiprocessing as mp
+
 from .utils import AverageMeter
 
 

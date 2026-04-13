@@ -26,7 +26,7 @@ model:
       seg: 0.1
 
     dataset_type:  real # real
-    training_type: finetune #EE3D-W-finetuning #finetune #pretrain # finetune
+    training_type: train #EE3D-W-finetuning #finetune #pretrain # finetune
     use_bg_augmentation: true
     temporal_steps: 40
     sample_step: 0 # not used currently

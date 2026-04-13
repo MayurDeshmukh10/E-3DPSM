@@ -1,148 +1,125 @@
-# E-3DPSM: A State Machine for Event-based Egocentric 3D Human Pose Estimation [CVPR'24]
-<center>
-
-<!-- Christen Millerdurai<sup>1,2</sup>, Hiroyasu Akada<sup>1</sup>, Jian Wang<sup>1</sup>, Diogo Luvizon<sup>1</sup>, Christian Theobalt<sup>1</sup>, Vladislav Golyanik<sup>1</sup> -->
-
-<sup>1</sup> Max Planck Institute for Informatics, SIC  &nbsp; &nbsp; &nbsp; &nbsp; <sup>2</sup> Saarland University, SIC  
-
-</center>
-
-## Official PyTorch implementation
-
-[Project page](https://4dqv.mpi-inf.mpg.de/EventEgo3D/) | [Paper](https://arxiv.org/abs/2404.08640) 
+# E-3DPSM: A State Machine for Event-based Egocentric 3D Human Pose Estimation
 
 <p align="center">
-<img src="images/teaser.gif" alt="EventEgo3D" height="172"  /></br>
+  <strong>Mayur Deshmukh</strong><sup>1,2</sup> &nbsp;
+  <strong>Hiroyasu Akada</strong><sup>1</sup> &nbsp;
+  <strong>Helge Rhodin</strong><sup>1,3</sup> &nbsp;
+  <strong>Christian Theobalt</strong><sup>1</sup> &nbsp;
+  <strong>Vladislav Golyanik</strong><sup>1</sup>
 </p>
-
-### Abstract
-
-Event cameras offer multiple advantages in monocular egocentric 3D human pose estimation from head-mounted devices, such as millisecond temporal resolution, high dynamic range, and negligible motion blur. Existing methods effectively leverage these properties, but suffer from low 3D estimation accuracy, insufficient in many applications (e.g., immersive VR/AR). This is due to the design not being fully tailored towards event streams (e.g., their asynchronous and continuous nature), leading to high sensitivity to self-occlusions and temporal jitter in the estimates. This paper rethinks the setting and introduces E-3DPSM, an event-driven continuous pose state machine for event-based egocentric 3D human pose estimation. E-3DPSM aligns continuous human motion with fine-grained event dynamics; it evolves latent states and predicts continuous changes in 3D joint positions associated with observed events, which are fused with direct 3D human pose predictions, leading to stable and drift-free final 3D pose reconstructions. E-3DPSM runs in real-time at 80 Hz on a single workstation and sets a new state of the art in experiments on two benchmarks, improving accuracy by up to 19% (MPJPE) and temporal stability by up to 64%.
-
-### Advantages of Event Based Vision
-High Speed Motion                      |  Low Light Performance          
-:-------------------------:|:-------------------------:|
-| <img src="images/fast_motion.gif" alt="High Speed Motion" width="350"/> | <img src="images/low_light.gif" alt="Low Light Performance" width="350"/> |
-
-### EventEgo3D
 
 <p align="center">
-<img src="images/method_figure.png" alt="E-3DPSM" /></br>
+  <sup>1</sup> Max Planck Institute for Informatics, SIC &nbsp;
+  <sup>2</sup> Saarland University &nbsp;
+  <sup>3</sup> Bielefeld University
 </p>
 
-## Usage
------
-- [EventEgo3D: 3D Human Motion Capture from Egocentric Event Streams \[CVPR'24\]](#eventego3d-3d-human-motion-capture-from-egocentric-event-streams-cvpr24)
-  - [Official PyTorch implementation](#official-pytorch-implementation)
-    - [Abstract](#abstract)
-    - [Advantages of Event Based Vision](#advantages-of-event-based-vision)
-    - [EventEgo3D](#eventego3d)
-  - [Usage](#usage)
-    - [Installation](#installation)
-      - [Dependencies](#dependencies)
-      - [Pretrained Model](#pretrained-model)
-    - [Datasets](#datasets)
-    - [Training](#training)
-    - [Evaluation](#evaluation)
-      - [EE3D-S](#ee3d-s)
-      - [EE3D-R](#ee3d-r)
-  - [Citation](#citation)
-  - [License](#license)
-  - [Acknowledgements](#acknowledgements)
-------
+<p align="center">
+  <strong>CVPR 2026</strong>
+</p>
 
-### Installation
+<p align="center">
+  <a href="#">Paper</a> |
+  <a href="https://www.youtube.com/embed/jatNH0s_k_E">Video</a> |
+  <a href="#">Project Page</a>
+</p>
 
-Clone the repository
-```bash
-git clone https://github.com/Chris10M/EventEgo3D.git
-cd EventEgo3D
-```
+<p align="center">
+  <img src="images/teaser.gif" alt="E-3DPSM teaser" width="100%"/>
+</p>
 
-#### Dependencies
-Create a conda enviroment from the file 
-```bash
-conda env create -f EventEgo3D.yml
-```
-Next, install  **[ocam_python](https://github.com/Chris10M/ocam_python.git)** using pip
-```bash
-pip3 install git+https://github.com/Chris10M/ocam_python.git
-```
+<p align="center">
+  <strong>Rethinking event-based egocentric 3D human pose estimation.</strong>
+  E-3DPSM models motion as a continuous event-driven state evolution, fusing delta and direct 3D pose updates to achieve real-time and temporally stable 3D reconstruction.
+</p>
 
+## Abstract
 
-#### Pretrained Model 
+Event cameras offer multiple advantages in monocular egocentric 3D human pose estimation from head-mounted devices, such as millisecond temporal resolution, high dynamic range, and negligible motion blur. Existing methods effectively leverage these properties, but suffer from low 3D estimation accuracy that remains insufficient for applications such as immersive VR/AR. This is due to designs not being fully tailored to event streams and their asynchronous, continuous nature, leading to high sensitivity to self-occlusions and temporal jitter. E-3DPSM rethinks this setting with an event-driven continuous pose state machine for event-based egocentric 3D human pose estimation. It aligns continuous human motion with fine-grained event dynamics, evolves latent states, and predicts continuous 3D joint updates that are fused with direct 3D pose predictions, producing stable and drift-free reconstructions. E-3DPSM runs in real time at 80 Hz on a single workstation and sets a new state of the art on two benchmarks, improving MPJPE by up to 19% and temporal stability by up to 2.7x.
 
-The pretrained model ```best_model_state_dict.pth``` can be found [here](https://eventego3d.mpi-inf.mpg.de/CVPR/best_model_state_dict.pth). Please place the model in the following folder structure.
+## Method
 
-```bash
-EventEgo3D
-|
-└── saved_models
-         |
-         └── best_model_state_dict.pth
-```
+<p align="center">
+  <img src="images/method_w_caption.png" alt="E-3DPSM method overview" width="100%"/>
+</p>
 
+## Hardware Setup
 
-### Datasets
+<p align="center">
+  <img src="images/hmd.png" alt="Head-mounted hardware setup" width="75%"/>
+</p>
 
-The datasets can obtained by executing the files in [`dataset_scripts`](./dataset_scripts/). For detailed information, refer [here](./dataset_scripts/). 
+The head-mounted device uses a single fisheye egocentric event camera for input, an NVIDIA Jetson Orin Nano for onboard processing, and a portable power source for standalone operation.
 
+## Quantitative Results
 
-### Training
+<p align="center">
+  <img src="images/quantitative_results.png" alt="Quantitative results" width="100%"/>
+</p>
 
-For training, ensure [EE3D-S](./dataset_scripts#ee3d-s), [EE3D-R](./dataset_scripts#ee3d-r) and [EE3D[BG-AUG]](./dataset_scripts#ee3d-bg-aug) are present. 
-The batch size and checkpoint path can be specified with the following environment variables, ```BATCH_SIZE``` and ```CHECKPOINT_PATH```.
+E-3DPSM improves both 3D pose accuracy and temporal stability compared with prior event-based egocentric pose estimation methods.
+
+## Repository Structure
+
+- `run.py`: Lightning CLI entrypoint for training, validation, and testing
+- `configs/`: experiment configurations for pretraining, finetuning, and evaluation
+- `EventEgoPoseEstimation/`: core model, dataset, loss, and training code
+- `scripts/`: legacy evaluation shell scripts
+- `images/`: README and project assets
+
+## Setup
+
+Create the conda environment:
 
 ```bash
-python train.py 
+conda env create -f environment.yml
+conda activate EE3D_CVPR
 ```
 
-### Evaluation
-
-#### EE3D-S 
-For evaluation, ensure [EE3D-S Test](./dataset_scripts#ee3d-s-test) is present. Please run, 
+Install `ocam` support if it is not already available in your environment:
 
 ```bash
-python evaluate_ee3d_s.py 
+pip install git+https://github.com/Chris10M/ocam_python.git
 ```
 
-The provided [pretrained](#pretrained-model) checkpoint gives us an accuracy of,
+## Training and Evaluation
 
-| Arch | Head_MPJPE | Neck_MPJPE | Right_shoulder_MPJPE | Right_elbow_MPJPE | Right_wrist_MPJPE | Left_shoulder_MPJPE | Left_elbow_MPJPE | Left_wrist_MPJPE | Right_hip_MPJPE | Right_knee_MPJPE | Right_ankle_MPJPE | Right_foot_MPJPE | Left_hip_MPJPE | Left_knee_MPJPE | Left_ankle_MPJPE | Left_foot_MPJPE | MPJPE | Head_PAMPJPE | Neck_PAMPJPE | Right_shoulder_PAMPJPE | Right_elbow_PAMPJPE | Right_wrist_PAMPJPE | Left_shoulder_PAMPJPE | Left_elbow_PAMPJPE | Left_wrist_PAMPJPE | Right_hip_PAMPJPE | Right_knee_PAMPJPE | Right_ankle_PAMPJPE | Right_foot_PAMPJPE | Left_hip_PAMPJPE | Left_knee_PAMPJPE | Left_ankle_PAMPJPE | Left_foot_PAMPJPE | PAMPJPE |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| EgoHPE | 29.020 | 44.788 | 51.028 | 98.415 | 144.434 | 53.148 | 103.996 | 141.923 | 91.309 | 146.183 | 210.144 | 224.728 | 87.292 | 141.563 | 210.710 | 219.027 | 124.857 | 50.010 | 47.727 | 50.475 | 86.859 | 131.602 | 53.526 | 90.658 | 127.851 | 74.953 | 98.317 | 116.803 | 129.032 | 75.543 | 96.434 | 119.562 | 132.058 | 92.588 |
+This repository uses `pytorch_lightning` via `LightningCLI`, so experiments are launched through `run.py` with a config file.
 
-
-#### EE3D-R
-For evaluation, ensure [EE3D-R](./dataset_scripts#ee3d-r) is present. Please run, 
+Example training:
 
 ```bash
-python evaluate_ee3d_r.py 
+python run.py fit --config configs/pretrain_deform_attention_kf_lnes.yaml
 ```
 
-The provided [pretrained](#pretrained-model) checkpoint gives us an accuracy of,
+Example finetuning:
 
-| Arch | walk_MPJPE | crouch_MPJPE | pushup_MPJPE | boxing_MPJPE | kick_MPJPE | dance_MPJPE | inter. with env_MPJPE | crawl_MPJPE | sports_MPJPE | jump_MPJPE | MPJPE | walk_PAMPJPE | crouch_PAMPJPE | pushup_PAMPJPE | boxing_PAMPJPE | kick_PAMPJPE | dance_PAMPJPE | inter. with env_PAMPJPE | crawl_PAMPJPE | sports_PAMPJPE | jump_PAMPJPE | PAMPJPE |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| EgoHPE | 70.881 | 163.840 | 97.886 | 136.571 | 103.724 | 88.877 | 103.191 | 109.714 | 101.020 | 97.320 | 107.302 | 52.113 | 99.483 | 75.530 | 104.667 | 86.055 | 71.968 | 70.859 | 77.949 | 77.827 | 80.179 | 79.663 |
+```bash
+python run.py fit --config configs/finetune_deform_attention_kf_lnes.yaml
+```
+
+Example evaluation:
+
+```bash
+python run.py test --config configs/evaluate_deform_attention_kf_lnes.yaml
+```
+
+Please update dataset paths, checkpoint paths, and runtime settings inside the selected config before launching an experiment.
 
 ## Citation
 
-If you find this code useful for your research, please cite our paper:
+If you find this repository useful, please cite:
+
+```bibtex
+@inproceedings{deshmukh2026e3dpsm,
+  title = {E-3DPSM: A State Machine for Event-based Egocentric 3D Human Pose Estimation},
+  author = {Deshmukh, Mayur and Akada, Hiroyasu and Rhodin, Helge and Theobalt, Christian and Golyanik, Vladislav},
+  booktitle = {Computer Vision and Pattern Recognition (CVPR)},
+  year = {2026}
+}
 ```
-@inproceedings{Millerdurai_EventEgo3D_2024, 
-    title={EventEgo3D: 3D Human Motion Capture from Egocentric Event Streams}, 
-    author={Christen Millerdurai and Hiroyasu Akada and Jian Wang and Diogo Luvizon and Christian Theobalt and Vladislav Golyanik}, 
-    booktitle = {Computer Vision and Pattern Recognition (CVPR)}, 
-    year={2024} 
-} 
-```
+
 
 ## License
 
-EventEgo3D is under [CC-BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/) license. The license also applies to the pre-trained models.
-
-## Acknowledgements
-
-The code is partially adapted from [here](https://github.com/microsoft/human-pose-estimation.pytorch). 
-
+This project is released under the license provided in [LICENSE](LICENSE).

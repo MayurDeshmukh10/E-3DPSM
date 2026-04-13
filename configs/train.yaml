@@ -25,12 +25,12 @@ model:
       delta_j3d: 0.01
       seg: 0.1
 
-    dataset_type:  real # real
-    training_type: finetune #finetune #pretrain # finetune
-    use_bg_augmentation: true
+    dataset_type:  in_the_wild #real # real
+    training_type: finetuning #train #finetune #pretrain # finetune
+    use_bg_augmentation: false
     temporal_steps: 40
     sample_step: 0 # not used currently
-    batch_size: 8
+    batch_size: 2
     workers: 14
     tbptt_steps: 40
     fixed_sequence_length: 40
@@ -52,7 +52,7 @@ trainer:
   accelerator: gpu
   max_epochs: 80
   check_val_every_n_epoch: 1
-  devices: 4
+  devices: 1
   # num_nodes: 2
   benchmark: false
   # precision: 16-mixed
@@ -88,13 +88,13 @@ trainer:
     # - class_path: pytorch_lightning.callbacks.LearningRateFinder
 
   logger:
-  - class_path: pytorch_lightning.loggers.WandbLogger
-    init_args:
-      name: current_best_w_40ts # Experiment name on wandb
-      project: EventEgo3Dv2  # Replace with your project name on wandb
-      save_dir: ./results/wandb_data/current_best_w_40ts  # Local directory to save wandb logs
-      log_model: true  # Log the model checkpoints to wandb
-      offline: false  # Set to true if you want to log offline and sync later
+  # - class_path: pytorch_lightning.loggers.WandbLogger
+  #   init_args:
+  #     name: current_best_w_40ts # Experiment name on wandb
+  #     project: EventEgo3Dv2  # Replace with your project name on wandb
+  #     save_dir: ./results/wandb_data/current_best_w_40ts  # Local directory to save wandb logs
+  #     log_model: true  # Log the model checkpoints to wandb
+  #     offline: false  # Set to true if you want to log offline and sync later
   - class_path: pytorch_lightning.loggers.TensorBoardLogger
     init_args:
       save_dir: ./results/

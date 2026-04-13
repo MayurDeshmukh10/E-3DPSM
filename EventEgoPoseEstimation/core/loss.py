@@ -64,32 +64,6 @@ class JointMSELoss(nn.Module):
 
         return loss.mean() / num_joints
 
-# class BoneLengthLoss(nn.Module):
-#     def __init__(self, use_target_weight):
-#         super(BoneLengthLoss, self).__init__()
-#         self.criterion = nn.L1Loss(size_average=False)
-#         self.use_target_weight = use_target_weight
-
-#     def forward(self, output, target):        
-#         B_up_1_pred = torch.abs(output[:, :, 5, :] - output[:, :, 6, :]).sum(dim=-1) + torch.abs(output[:, :, 2, :] - output[:, :, 3, :]).sum(dim=-1)
-#         B_up_1_gt = torch.abs(target[:, :, 5, :] - target[:, :, 6, :]).sum(dim=-1) + torch.abs(target[:, :, 2, :] - target[:, :, 3, :]).sum(dim=-1)
-
-#         B_up_2_pred = torch.abs(output[:, :, 6, :] - output[:, :, 7, :]).sum(dim=-1) + torch.abs(output[:, :, 3, :] - output[:, :, 4, :]).sum(dim=-1)
-#         B_up_2_gt = torch.abs(target[:, :, 6, :] - target[:, :, 7, :]).sum(dim=-1) + torch.abs(target[:, :, 3, :] - target[:, :, 4, :]).sum(dim=-1)
-
-#         B_low_1_pred = torch.abs(output[:, :, 12, :] - output[:, :, 13, :]).sum(dim=-1) + torch.abs(output[:, :, 8, :] - output[:, :, 9, :]).sum(dim=-1)
-#         B_low_1_gt = torch.abs(target[:, :, 12, :] - target[:, :, 13, :]).sum(dim=-1) + torch.abs(target[:, :, 8, :] - target[:, :, 9, :]).sum(dim=-1)
-
-#         B_low_2_pred = torch.abs(output[:, :, 13, :] - output[:, :, 14, :]).sum(dim=-1) + torch.abs(output[:, :, 9, :] - output[:, :, 10, :]).sum(dim=-1)
-#         B_low_2_gt = torch.abs(target[:, :, 13, :] - target[:, :, 14, :]).sum(dim=-1) + torch.abs(target[:, :, 9, :] - target[:, :, 10, :]).sum(dim=-1)
-
-#         bone_length_up = torch.abs(B_up_1_pred - B_up_1_gt) + torch.abs(B_up_2_pred - B_up_2_gt)
-#         bone_length_low = torch.abs(B_low_1_pred - B_low_1_gt) + torch.abs(B_low_2_pred - B_low_2_gt)
-
-#         bone_length = torch.mean(bone_length_up + bone_length_low)
-
-#         return bone_length
-
 class BoneLengthLoss(nn.Module):
     def __init__(self, use_target_weight=False):
         super(BoneLengthLoss, self).__init__()
