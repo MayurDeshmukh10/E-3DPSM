@@ -54,7 +54,7 @@ The head-mounted device uses a single fisheye egocentric event camera for input,
 ## Quantitative Results
 
 <p align="center">
-  <img src="images/quantitative_results.png" alt="Quantitative results" width="100%"/>
+  <img src="images/quantitative_results.png" alt="Quantitative results" width="60%"/>
 </p>
 
 E-3DPSM improves both 3D pose accuracy and temporal stability compared with prior event-based egocentric pose estimation methods.
