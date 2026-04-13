@@ -64,7 +64,7 @@ E-3DPSM improves both 3D pose accuracy and temporal stability compared with prio
 - `run.py`: Lightning CLI entrypoint for training, validation, and testing
 - `configs/`: experiment configurations for pretraining, finetuning, and evaluation
 - `EventEgoPoseEstimation/`: core model, dataset, loss, and training code
-- `scripts/`: legacy evaluation shell scripts
+- `scripts/`: Slurm shell scripts
 - `images/`: README and project assets
 
 ## Setup
@@ -73,7 +73,7 @@ Create the conda environment:
 
 ```bash
 conda env create -f environment.yml
-conda activate EE3D_CVPR
+conda activate e3dpsm
 ```
 
 Install `ocam` support if it is not already available in your environment:
