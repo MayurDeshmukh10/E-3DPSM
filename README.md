@@ -119,6 +119,9 @@ If you find this repository useful, please cite:
 }
 ```
 
+## Acknowledgments
+
+This codebase borrows dataloaders from [EventEgo3D++](https://github.com/Chris10M/EventEgo3D_plus_plus).
 
 ## License
 
