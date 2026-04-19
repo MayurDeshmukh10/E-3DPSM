@@ -19,9 +19,9 @@
 </p>
 
 <p align="center">
-  <a href="#">Paper</a> |
-  <a href="https://www.youtube.com/embed/jatNH0s_k_E">Video</a> |
-  <a href="#">Project Page</a>
+  <a href="https://arxiv.org/abs/2604.08543">Paper</a> |
+  <a href="https://www.youtube.com/watch?v=bCfHkJylC68">Video</a> |
+  <a href="https://4dqv.mpi-inf.mpg.de/E-3DPSM/">Project Page</a>
 </p>
 
 <p align="center">
